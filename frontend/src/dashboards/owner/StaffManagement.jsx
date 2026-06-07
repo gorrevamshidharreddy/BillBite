@@ -25,9 +25,12 @@ import {
   Password as PasswordIcon,
 } from '@mui/icons-material';
 import api from '../../services/api';
+import { useTenant } from '../../context/TenantContext';
 
 export default function StaffManagement() {
+  const { currentTenant } = useTenant();
   const [staff, setStaff] = useState([]);
+  const [assignments, setAssignments] = useState({});
   const [form, setForm] = useState({
     email: '',
     full_name: '',
@@ -39,24 +42,42 @@ export default function StaffManagement() {
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
-  const fetchStaff = async () => {
+  const isLiquorMart = currentTenant?.business_type === 'liquor_mart';
+
+  const fetchStaffAndAssignments = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/owner/staff');
-      setStaff(res.data);
+      const staffRes = await api.get('/owner/staff');
+      setStaff(staffRes.data);
+
+      if (isLiquorMart) {
+        const assignRes = await api.get('/owner/cashier-assignments');
+        const map = {};
+        assignRes.data.forEach((item) => {
+          map[item.cashier_id] = {
+            assigned_to_shop: item.assigned_to_shop,
+            assigned_to_mart: item.assigned_to_mart,
+          };
+        });
+        setAssignments(map);
+      }
     } catch (err) {
       console.error(err);
-      setSnackbar({ open: true, message: 'Failed to load staff', severity: 'error' });
+      setSnackbar({ open: true, message: 'Failed to load staff data', severity: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchStaff();
-  }, []);
+    if (currentTenant) {
+      fetchStaffAndAssignments();
+    }
+  }, [currentTenant]);
 
   const handleCreate = async () => {
+    // Log payload for debugging
+    console.log('Creating cashier with payload:', form);
     if (!form.email || !form.full_name || !form.password) {
       setSnackbar({ open: true, message: 'Email, Name and Password are required', severity: 'warning' });
       return;
@@ -66,9 +87,33 @@ export default function StaffManagement() {
       await api.post('/owner/staff', form);
       setForm({ email: '', full_name: '', phone: '', password: '' });
       setSnackbar({ open: true, message: 'Cashier created successfully', severity: 'success' });
-      fetchStaff();
+      fetchStaffAndAssignments();
     } catch (err) {
-      setSnackbar({ open: true, message: err.response?.data?.detail || 'Failed to create cashier', severity: 'error' });
+      const detail = err.response?.data?.detail || err.message || 'Failed to create cashier';
+      console.error('Create cashier error:', err);
+      setSnackbar({ open: true, message: detail, severity: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Create a demo cashier locally (no backend call)
+  const createDemoCashierFixed = async () => {
+    setLoading(true);
+    try {
+      const demoData = {
+        id: Date.now(),
+        email: 'cashier1@gmain.com',
+        full_name: 'Lokesh',
+        phone: '123',
+        is_active: true,
+      };
+      // Add to staff list locally
+      setStaff((prev) => [...prev, demoData]);
+      setSnackbar({ open: true, message: 'Demo cashier added locally', severity: 'success' });
+    } catch (err) {
+      console.error('Demo cashier error:', err);
+      setSnackbar({ open: true, message: 'Failed to add demo cashier', severity: 'error' });
     } finally {
       setLoading(false);
     }
@@ -78,7 +123,7 @@ export default function StaffManagement() {
     try {
       await api.put(`/owner/staff/${userId}`, { is_active: !currentStatus });
       setSnackbar({ open: true, message: 'Status updated', severity: 'success' });
-      fetchStaff();
+      fetchStaffAndAssignments();
     } catch (err) {
       setSnackbar({ open: true, message: 'Failed to update status', severity: 'error' });
     }
@@ -92,6 +137,36 @@ export default function StaffManagement() {
       setSnackbar({ open: true, message: 'Password reset successfully', severity: 'success' });
     } catch (err) {
       setSnackbar({ open: true, message: 'Failed to reset password', severity: 'error' });
+    }
+  };
+
+  const handleAssignmentToggle = async (cashierId, field) => {
+    const currentAssign = assignments[cashierId] || { assigned_to_shop: false, assigned_to_mart: false };
+    const updated = {
+      ...currentAssign,
+      [field]: !currentAssign[field],
+    };
+
+    // Optimistic UI update
+    setAssignments((prev) => ({
+      ...prev,
+      [cashierId]: updated,
+    }));
+
+    try {
+      await api.post('/owner/cashier-assignments', {
+        cashier_id: cashierId,
+        assigned_to_shop: updated.assigned_to_shop,
+        assigned_to_mart: updated.assigned_to_mart,
+      });
+      setSnackbar({ open: true, message: 'Assignment updated successfully', severity: 'success' });
+    } catch (err) {
+      // Revert on error
+      setAssignments((prev) => ({
+        ...prev,
+        [cashierId]: currentAssign,
+      }));
+      setSnackbar({ open: true, message: 'Failed to update assignment', severity: 'error' });
     }
   };
 
@@ -152,15 +227,25 @@ export default function StaffManagement() {
               />
             </Grid>
             <Grid item xs={12} sm={6} md={2}>
-              <Button
-                fullWidth
-                variant="contained"
-                onClick={handleCreate}
-                disabled={loading}
-                startIcon={<AddIcon />}
-              >
-                Create Cashier
-              </Button>
+                <Button
+                  fullWidth
+                  variant="contained"
+                  onClick={handleCreate}
+                  disabled={loading}
+                  startIcon={<AddIcon />}
+                >
+                  Create Cashier
+                </Button>
+                {/* Demo button to create a fixed cashier */}
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={createDemoCashierFixed}
+                  disabled={loading}
+                  sx={{ mt: 1 }}
+                >
+                  Add Demo Cashier
+                </Button>
             </Grid>
           </Grid>
         </Paper>
@@ -173,6 +258,8 @@ export default function StaffManagement() {
                 <TableCell><strong>Email</strong></TableCell>
                 <TableCell><strong>Full Name</strong></TableCell>
                 <TableCell><strong>Phone</strong></TableCell>
+                {isLiquorMart && <TableCell align="center"><strong>Shop</strong></TableCell>}
+                {isLiquorMart && <TableCell align="center"><strong>Mart</strong></TableCell>}
                 <TableCell align="center"><strong>Active</strong></TableCell>
                 <TableCell align="center"><strong>Actions</strong></TableCell>
               </TableRow>
@@ -183,6 +270,24 @@ export default function StaffManagement() {
                   <TableCell>{cashier.email}</TableCell>
                   <TableCell>{cashier.full_name}</TableCell>
                   <TableCell>{cashier.phone || '—'}</TableCell>
+                  {isLiquorMart && (
+                    <TableCell align="center">
+                      <Switch
+                        checked={assignments[cashier.id]?.assigned_to_shop ?? false}
+                        onChange={() => handleAssignmentToggle(cashier.id, 'assigned_to_shop')}
+                        size="small"
+                      />
+                    </TableCell>
+                  )}
+                  {isLiquorMart && (
+                    <TableCell align="center">
+                      <Switch
+                        checked={assignments[cashier.id]?.assigned_to_mart ?? false}
+                        onChange={() => handleAssignmentToggle(cashier.id, 'assigned_to_mart')}
+                        size="small"
+                      />
+                    </TableCell>
+                  )}
                   <TableCell align="center">
                     <FormControlLabel
                       control={
@@ -210,7 +315,7 @@ export default function StaffManagement() {
               ))}
               {staff.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={5} align="center">
+                  <TableCell colSpan={isLiquorMart ? 7 : 5} align="center">
                     <Typography color="text.secondary">No cashiers found.</Typography>
                   </TableCell>
                 </TableRow>

@@ -393,6 +393,16 @@ async def create_staff(data: StaffCreate, current_owner: dict = Depends(get_curr
         phone=data.phone,
     )
     db.add(cashier)
+    await db.flush()  # Generate cashier.id
+    
+    # Create default CashierAssignment for the new cashier
+    assignment = CashierAssignment(
+        cashier_id=cashier.id,
+        tenant_id=tenant_id,
+        assigned_to_shop=True,
+        assigned_to_mart=False
+    )
+    db.add(assignment)
     await db.commit()
     return {"id": cashier.id, "email": cashier.email}
 

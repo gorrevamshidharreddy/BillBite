@@ -24,6 +24,19 @@ export function TenantProvider({ children }) {
     }
   }, [authTenants, user]);
 
+  // Auto-set current tenant from user when no tenant list is available (e.g., cashier role)
+  useEffect(() => {
+    if (user && user.tenant_id && availableTenants.length === 0) {
+      const fallbackTenant = {
+        id: user.tenant_id,
+        business_type: user.business_type,
+        name: user.name,
+      };
+      setCurrentTenant(fallbackTenant);
+      localStorage.setItem('currentTenantId', user.tenant_id);
+    }
+  }, [user, availableTenants]);
+
   // Load saved tenant from localStorage or set default
   useEffect(() => {
     if (!token) {

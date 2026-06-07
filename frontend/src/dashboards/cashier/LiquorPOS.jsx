@@ -82,26 +82,7 @@ const LiquorPOS = () => {
     checkAssignment();
   }, [user]);
 
-  // If not assigned to mart, show access denied message
-  if (assignmentsLoading) {
-    return (
-      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-        <CircularProgress />
-      </Box>
-    );
-  }
 
-  if (!assignedToMart) {
-    return (
-      <Box sx={{ p: 3, textAlign: 'center' }}>
-        <Alert severity="error" sx={{ maxWidth: 500, mx: 'auto' }}>
-          Access Denied: You are not assigned to the mart. Please contact your owner.
-        </Alert>
-      </Box>
-    );
-  }
-
-  // Rest of the component (existing code unchanged from here)
   useEffect(() => {
     setTimeout(() => searchInputRef.current?.focus(), 100);
   }, []);
@@ -111,43 +92,11 @@ const LiquorPOS = () => {
     setCartTotal(total);
   }, [cart]);
 
-  const handleSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    setLoading(true);
-    try {
-      const response = await api.get('/cashier/liquor/search-brand', {
-        params: { q: searchQuery },
-      });
-      setSearchResults(response.data);
-    } catch (err) {
-      console.error('Search error', err);
-      setSnackbar({ open: true, message: 'Search failed', severity: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  }, [searchQuery]);
 
-  useEffect(() => {
-    const delay = setTimeout(handleSearch, 300);
-    return () => clearTimeout(delay);
-  }, [searchQuery, handleSearch]);
 
-  const handleBrandSelect = async (brand) => {
-    setSelectedBrand(brand);
-    setLoading(true);
-    try {
-      const response = await api.get(`/cashier/liquor/sizes/${brand.brand_code}`);
-      setSizes(response.data);
-    } catch (err) {
-      console.error('Failed to fetch sizes', err);
-      setSnackbar({ open: true, message: 'Could not load sizes', severity: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
+
+
+
 
   const addToCart = (size) => {
     if (size.current_stock <= 0) {

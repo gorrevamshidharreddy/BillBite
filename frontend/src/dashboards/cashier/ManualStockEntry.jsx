@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Box, Paper, Typography, TextField, Button, Grid,
-  Card, CardContent, Alert, Snackbar, CircularProgress,
-  List, ListItem, ListItemText, ListItemButton, Divider
+  Box, Paper, Typography, TextField, Button, Grid, Card, CardContent,
+  Alert, Snackbar, CircularProgress, List, ListItem, ListItemText,
+  ListItemButton, Divider,
 } from '@mui/material';
 import api from '../../services/api';
 import { useTenant } from '../../context/TenantContext';
@@ -24,26 +24,26 @@ const ManualStockEntry = () => {
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
-  // Check if cashier is assigned to mart
+  // Check if cashier is assigned to shop or mart (both can add manual stock)
   useEffect(() => {
-    const checkMartAssignment = async () => {
+    const checkAssignment = async () => {
       if (!token) {
         navigate('/login');
         return;
       }
       try {
         const res = await api.get('/cashier/my-assignments');
-        if (!res.data.assigned_to_mart) {
+        if (!res.data.assigned_to_shop && !res.data.assigned_to_mart) {
           navigate('/cashier', { replace: true });
         }
       } catch (err) {
-        console.error('Failed to check assignment', err);
+        console.error(err);
         navigate('/cashier', { replace: true });
       } finally {
         setCheckingAccess(false);
       }
     };
-    checkMartAssignment();
+    checkAssignment();
   }, [token, navigate]);
 
   const handleSearch = async () => {
@@ -69,7 +69,10 @@ const ManualStockEntry = () => {
     setCases(0);
     setLoose(0);
     try {
-      const res = await api.get(`/cashier/liquor/sizes/${brand.brand_code}`);
+      // ✅ Show all sizes (including zero stock) for manual stock entry
+      const res = await api.get(`/cashier/liquor/sizes/${brand.brand_code}`, {
+        params: { location: 'shop', show_all: true }
+      });
       setSizes(res.data);
       setSearchResults([]);
       setSearchTerm('');
@@ -111,7 +114,10 @@ const ManualStockEntry = () => {
         cases: casesNum,
         loose_bottles: looseNum
       });
-      const refreshRes = await api.get(`/cashier/liquor/sizes/${selectedBrand.brand_code}`);
+      // Refresh sizes to show updated stock
+      const refreshRes = await api.get(`/cashier/liquor/sizes/${selectedBrand.brand_code}`, {
+        params: { location: 'shop', show_all: true }
+      });
       const updatedSizes = refreshRes.data;
       setSizes(updatedSizes);
       const updatedProduct = updatedSizes.find(s => s.product_id === selectedProduct.product_id);
@@ -141,7 +147,7 @@ const ManualStockEntry = () => {
       <Paper sx={{ p: 3, borderRadius: 2 }}>
         <Typography variant="h5" gutterBottom>Manual Stock Entry</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Search for a brand → select a specific size → add cases and/or loose bottles.
+          Add stock directly to the shop inventory (cases and/or loose bottles).
         </Typography>
 
         <Grid container spacing={2}>
@@ -252,9 +258,7 @@ const ManualStockEntry = () => {
         </Grid>
 
         <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-          <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-            {snackbar.message}
-          </Alert>
+          <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
         </Snackbar>
       </Paper>
     </Box>
