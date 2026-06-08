@@ -89,13 +89,21 @@ export default function OwnerDashboard() {
       
       // Update tenant context with newest info from DB
       if (setCurrentTenant && typeof setCurrentTenant === 'function') {
-        setCurrentTenant({
-          ...currentTenant,
-          has_mart: res.data.has_mart,
-          mart_approved: res.data.mart_approved,
-          mart_name: res.data.mart_name,
-          mart_address: res.data.mart_address,
-        });
+        const isDifferent = 
+          currentTenant.has_mart !== res.data.has_mart ||
+          currentTenant.mart_approved !== res.data.mart_approved ||
+          currentTenant.mart_name !== res.data.mart_name ||
+          currentTenant.mart_address !== res.data.mart_address;
+          
+        if (isDifferent) {
+          setCurrentTenant({
+            ...currentTenant,
+            has_mart: res.data.has_mart,
+            mart_approved: res.data.mart_approved,
+            mart_name: res.data.mart_name,
+            mart_address: res.data.mart_address,
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to fetch tenant details', err);
@@ -103,10 +111,11 @@ export default function OwnerDashboard() {
   };
 
   useEffect(() => {
-    if (currentTenant) {
+    if (currentTenant?.id) {
       fetchTenantDetails();
     }
-  }, [currentTenant]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTenant?.id]);
 
   const handleMartRequestSubmit = async () => {
     if (!martName.trim() || !martAddress.trim()) {

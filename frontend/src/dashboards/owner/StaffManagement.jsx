@@ -70,10 +70,11 @@ export default function StaffManagement() {
   };
 
   useEffect(() => {
-    if (currentTenant) {
+    if (currentTenant?.id) {
       fetchStaffAndAssignments();
     }
-  }, [currentTenant]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTenant?.id]);
 
   const handleCreate = async () => {
     // Log payload for debugging
@@ -92,28 +93,6 @@ export default function StaffManagement() {
       const detail = err.response?.data?.detail || err.message || 'Failed to create cashier';
       console.error('Create cashier error:', err);
       setSnackbar({ open: true, message: detail, severity: 'error' });
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Create a demo cashier locally (no backend call)
-  const createDemoCashierFixed = async () => {
-    setLoading(true);
-    try {
-      const demoData = {
-        id: Date.now(),
-        email: 'cashier1@gmain.com',
-        full_name: 'Lokesh',
-        phone: '123',
-        is_active: true,
-      };
-      // Add to staff list locally
-      setStaff((prev) => [...prev, demoData]);
-      setSnackbar({ open: true, message: 'Demo cashier added locally', severity: 'success' });
-    } catch (err) {
-      console.error('Demo cashier error:', err);
-      setSnackbar({ open: true, message: 'Failed to add demo cashier', severity: 'error' });
     } finally {
       setLoading(false);
     }
@@ -227,25 +206,15 @@ export default function StaffManagement() {
               />
             </Grid>
             <Grid item xs={12} sm={6} md={2}>
-                <Button
-                  fullWidth
-                  variant="contained"
-                  onClick={handleCreate}
-                  disabled={loading}
-                  startIcon={<AddIcon />}
-                >
-                  Create Cashier
-                </Button>
-                {/* Demo button to create a fixed cashier */}
-                <Button
-                  fullWidth
-                  variant="outlined"
-                  onClick={createDemoCashierFixed}
-                  disabled={loading}
-                  sx={{ mt: 1 }}
-                >
-                  Add Demo Cashier
-                </Button>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={handleCreate}
+                // disabled={loading}
+                startIcon={<AddIcon />}
+              >
+                Create Cashier
+              </Button>
             </Grid>
           </Grid>
         </Paper>

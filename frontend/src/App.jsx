@@ -5,6 +5,15 @@ import AdminDashboard from './dashboards/admin/AdminDashboard';
 import OwnerDashboard from './dashboards/owner/OwnerDashboard';
 import CashierDashboard from './dashboards/cashier/CashierDashboard';
 import ProtectedRoute from './components/ProtectedRoute';
+import { useTenant } from './context/TenantContext';
+
+const OwnerIndexRedirect = () => {
+  const { currentTenant } = useTenant();
+  if (currentTenant?.business_type === 'liquor_mart') {
+    return <Navigate to="liquor/stock-verification" />;
+  }
+  return <Navigate to="stock" />;
+};
 
 // Admin sub-pages
 import TenantManagement from './dashboards/admin/TenantManagement';
@@ -63,7 +72,7 @@ function App() {
         <Route path="liquor/stock-verification" element={<LiquorOwnerTab />} />
         <Route path="liquor/profit-loss" element={<LiquorOwnerTab />} />
         <Route path="liquor/analytics" element={<LiquorOwnerTab />} />
-        <Route index element={<Navigate to="menu" />} />
+        <Route index element={<OwnerIndexRedirect />} />
       </Route>
 
       {/* Cashier routes */}
@@ -79,7 +88,7 @@ function App() {
           <Route path="expenditure" element={<Expenditure />} />
           {/* Common */}
           <Route path="history" element={<OrderHistory />} />
-          <Route index element={<Navigate to="pos" />} />
+          <Route index element={<Navigate to="daily-stock" />} />
         </Route>
 
       <Route path="*" element={<Navigate to="/login" />} />

@@ -21,7 +21,7 @@ class Tenant(Base):
     date_of_joining = Column(DateTime, default=datetime.utcnow)
     status = Column(String(50), default="active")
     created_at = Column(DateTime, default=datetime.utcnow)
-    business_type = Column(Enum('restaurant', 'liquor_mart'), default='restaurant', nullable=False)
+    business_type = Column(Enum('restaurant', 'liquor_mart', native_enum=False, length=50), default='restaurant', nullable=False)
     
     # Mart fields
     has_mart = Column(Boolean, default=False)
@@ -89,7 +89,7 @@ class MartRequest(Base):
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     requested_mart_name = Column(String(255), nullable=False)
     requested_mart_address = Column(Text, nullable=False)
-    status = Column(Enum('pending', 'approved', 'rejected'), default='pending')
+    status = Column(Enum('pending', 'approved', 'rejected', native_enum=False, length=50), default='pending')
     admin_notes = Column(Text, nullable=True)
     requested_at = Column(DateTime, default=datetime.utcnow)
     reviewed_at = Column(DateTime, nullable=True)
@@ -227,7 +227,7 @@ class LiquorTenantStock(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     product_id = Column(String(36), ForeignKey("liquor_products.id"), nullable=False)
-    location = Column(Enum('shop', 'mart'), nullable=False, default='shop')
+    location = Column(Enum('shop', 'mart', native_enum=False, length=50), nullable=False, default='shop')
     current_stock = Column(Integer, default=0)
     low_stock_threshold = Column(Integer, default=5)
     __table_args__ = (UniqueConstraint('tenant_id', 'product_id', 'location', name='uq_tenant_product_location'),)
@@ -241,7 +241,7 @@ class StockTransaction(Base):
     id = Column(String(36), primary_key=True, default=generate_uuid)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     product_id = Column(String(36), ForeignKey("liquor_products.id"), nullable=False)
-    location = Column(Enum('shop', 'mart'), nullable=False, default='shop')  # where stock was added
+    location = Column(Enum('shop', 'mart', native_enum=False, length=50), nullable=False, default='shop')  # where stock was added
     date = Column(DateTime, default=datetime.utcnow)
     cases_received = Column(Integer, default=0)
     loose_received = Column(Integer, default=0)
@@ -318,7 +318,7 @@ class DailyStockReconciliation(Base):
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     reconciliation_date = Column(DateTime, nullable=False)
     product_id = Column(String(36), ForeignKey("liquor_products.id"), nullable=False)
-    location = Column(Enum('shop', 'mart'), nullable=False, default='shop')  # which location this reconciliation is for
+    location = Column(Enum('shop', 'mart', native_enum=False, length=50), nullable=False, default='shop')  # which location this reconciliation is for
     
     receipts_cases = Column(Integer, default=0)
     receipts_loose = Column(Integer, default=0)

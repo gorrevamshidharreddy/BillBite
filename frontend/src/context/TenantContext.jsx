@@ -11,38 +11,47 @@ export function TenantProvider({ children }) {
   const [availableTenants, setAvailableTenants] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Sync available tenants from AuthContext
+  const [tenantsLoaded, setTenantsLoaded] = useState(false);
+
+  // Sync available tenants from AuthContext or fetch on reload
   useEffect(() => {
+    let isMounted = true;
     if (authTenants && authTenants.length > 0) {
       setAvailableTenants(authTenants);
+      setTenantsLoaded(true);
     } else if (user && user.role === 'admin') {
-      // For admin, we may want to fetch all tenants from the backend
-      // But we'll keep existing behavior: empty array and let refreshTenants fetch.
       setAvailableTenants([]);
-    } else {
+      setTenantsLoaded(true);
+    } else if (token && user) {
+      // If we have token and user but no tenants, we might be reloading. Fetch them.
+      api.get('/auth/tenants')
+        .then(res => {
+          if (isMounted) {
+            setAvailableTenants(res.data?.tenants || []);
+            setTenantsLoaded(true);
+          }
+        })
+        .catch(err => {
+          console.error('Failed to fetch tenants on reload', err);
+          if (isMounted) setTenantsLoaded(true);
+        });
+    } else if (!token) {
       setAvailableTenants([]);
+      setTenantsLoaded(true);
     }
-  }, [authTenants, user]);
+    return () => { isMounted = false; };
+  }, [authTenants, user, token]);
 
-  // Auto-set current tenant from user when no tenant list is available (e.g., cashier role)
-  useEffect(() => {
-    if (user && user.tenant_id && availableTenants.length === 0) {
-      const fallbackTenant = {
-        id: user.tenant_id,
-        business_type: user.business_type,
-        name: user.name,
-      };
-      setCurrentTenant(fallbackTenant);
-      localStorage.setItem('currentTenantId', user.tenant_id);
-    }
-  }, [user, availableTenants]);
-
-  // Load saved tenant from localStorage or set default
+  // Consolidate currentTenant setting logic
   useEffect(() => {
     if (!token) {
       setCurrentTenant(null);
       setLoading(false);
       return;
+    }
+
+    if (!tenantsLoaded || !user) {
+      return; // wait until tenants have finished loading and user is parsed
     }
 
     const savedTenantId = localStorage.getItem('currentTenantId');
@@ -54,15 +63,32 @@ export function TenantProvider({ children }) {
         return;
       }
     }
-    // Default to first tenant if any
+    
+    // Default to first available tenant
     if (availableTenants.length > 0) {
       setCurrentTenant(availableTenants[0]);
       localStorage.setItem('currentTenantId', availableTenants[0].id);
-    } else {
-      setCurrentTenant(null);
+      setLoading(false);
+      return;
     }
+
+    // Fallback: If no availableTenants (e.g., on reload), use user.tenant_id from token
+    if (user.tenant_id) {
+      const fallbackTenant = {
+        id: user.tenant_id,
+        business_type: user.business_type,
+        name: user.name,
+      };
+      setCurrentTenant(fallbackTenant);
+      localStorage.setItem('currentTenantId', user.tenant_id);
+      setLoading(false);
+      return;
+    }
+
+    // If we reach here, there's no tenant at all
+    setCurrentTenant(null);
     setLoading(false);
-  }, [token, availableTenants]);
+  }, [token, availableTenants, tenantsLoaded, user]);
 
   // Update axios header when tenant changes
   useEffect(() => {
