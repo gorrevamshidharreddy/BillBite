@@ -1,5 +1,5 @@
 // frontend/src/dashboards/owner/OwnerDashboard.jsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
@@ -17,7 +17,16 @@ import {
   useTheme,
   Chip,
   Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Button,
+  Alert,
+  Snackbar,
 } from '@mui/material';
+import api from '../../services/api';
 import MenuIcon from '@mui/icons-material/Menu';
 import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import InventoryIcon from '@mui/icons-material/Inventory';
@@ -58,10 +67,76 @@ export default function OwnerDashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const { logout } = useAuth();
-  const { currentTenant } = useTenant();
+  const { currentTenant, setCurrentTenant } = useTenant();
+
+  // Mart Request related states
+  const [tenantDetails, setTenantDetails] = useState(null);
+  const [openMartDialog, setOpenMartDialog] = useState(false);
+  const [martName, setMartName] = useState('');
+  const [martAddress, setMartAddress] = useState('');
+  const [martRequestLoading, setMartRequestLoading] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
   const isLiquorMart = currentTenant?.business_type === 'liquor_mart';
   const navItems = isLiquorMart ? liquorNavItems : restaurantNavItems;
+
+  const fetchTenantDetails = async () => {
+    try {
+      const res = await api.get('/owner/tenant');
+      setTenantDetails(res.data);
+      setMartName(res.data.mart_name || `${res.data.name} Mart`);
+      setMartAddress(res.data.mart_address || res.data.address || '');
+      
+      // Update tenant context with newest info from DB
+      if (setCurrentTenant && typeof setCurrentTenant === 'function') {
+        const isDifferent = 
+          currentTenant.has_mart !== res.data.has_mart ||
+          currentTenant.mart_approved !== res.data.mart_approved ||
+          currentTenant.mart_name !== res.data.mart_name ||
+          currentTenant.mart_address !== res.data.mart_address;
+          
+        if (isDifferent) {
+          setCurrentTenant({
+            ...currentTenant,
+            has_mart: res.data.has_mart,
+            mart_approved: res.data.mart_approved,
+            mart_name: res.data.mart_name,
+            mart_address: res.data.mart_address,
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch tenant details', err);
+    }
+  };
+
+  useEffect(() => {
+    if (currentTenant?.id) {
+      fetchTenantDetails();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTenant?.id]);
+
+  const handleMartRequestSubmit = async () => {
+    if (!martName.trim() || !martAddress.trim()) {
+      setSnackbar({ open: true, message: 'Mart name and address are required', severity: 'warning' });
+      return;
+    }
+    setMartRequestLoading(true);
+    try {
+      await api.post('/owner/mart/request', {
+        mart_name: martName,
+        mart_address: martAddress,
+      });
+      setSnackbar({ open: true, message: 'Mart activation request submitted successfully!', severity: 'success' });
+      setOpenMartDialog(false);
+      fetchTenantDetails();
+    } catch (err) {
+      setSnackbar({ open: true, message: err.response?.data?.detail || 'Failed to submit request', severity: 'error' });
+    } finally {
+      setMartRequestLoading(false);
+    }
+  };
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
 
@@ -159,7 +234,76 @@ export default function OwnerDashboard() {
           mt: 8,
         }}
       >
+        {/* Mart Activation alert banner for Liquor Mart owners */}
+        {isLiquorMart && tenantDetails && !tenantDetails.has_mart && (
+          <Alert 
+            severity={tenantDetails.mart_approved ? "success" : "warning"}
+            action={
+              !tenantDetails.mart_approved && (
+                <Button color="inherit" size="small" variant="outlined" onClick={() => setOpenMartDialog(true)}>
+                  Request Activation
+                </Button>
+              )
+            }
+            sx={{ mb: 3 }}
+          >
+            {tenantDetails.mart_approved 
+              ? "Your Mart activation request has been approved! Re-log in or refresh your session to see the Mart POS options."
+              : "Mart features are not active. Request activation to unlock Mart POS, Stock Transfer, and separate Mart stock tracking."}
+          </Alert>
+        )}
+
         <Outlet />
+
+        {/* Mart Activation Dialog */}
+        <Dialog open={openMartDialog} onClose={() => setOpenMartDialog(false)} maxWidth="sm" fullWidth>
+          <DialogTitle>Request Mart Activation</DialogTitle>
+          <DialogContent>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Enter the name and address of the Mart to request activation. An admin will review and approve your request.
+            </Typography>
+            <TextField
+              autoFocus
+              margin="dense"
+              label="Mart Name"
+              type="text"
+              fullWidth
+              variant="outlined"
+              value={martName}
+              onChange={(e) => setMartName(e.target.value)}
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              margin="dense"
+              label="Mart Address"
+              type="text"
+              fullWidth
+              variant="outlined"
+              multiline
+              rows={3}
+              value={martAddress}
+              onChange={(e) => setMartAddress(e.target.value)}
+            />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setOpenMartDialog(false)} disabled={martRequestLoading}>Cancel</Button>
+            <Button variant="contained" onClick={handleMartRequestSubmit} disabled={martRequestLoading}>
+              Submit Request
+            </Button>
+          </DialogActions>
+        </Dialog>
+
+        {/* Snackbar for notifications */}
+        <Snackbar
+          open={snackbar.open}
+          autoHideDuration={6000}
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        >
+          <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })}>
+            {snackbar.message}
+          </Alert>
+        </Snackbar>
       </Box>
     </Box>
   );

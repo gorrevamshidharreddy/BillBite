@@ -6,12 +6,12 @@ from schema_manager import OrderItem, Base
 async def fix():
     print("1. Checking current database...")
     async with engine.connect() as conn:
-        result = await conn.execute(text("SELECT DATABASE()"))
+        result = await conn.execute(text("SELECT current_database()"))
         db_name = result.scalar()
         print(f"   Connected to database: {db_name}")
         
         # Check if cost_price exists
-        result = await conn.execute(text("SHOW COLUMNS FROM order_items"))
+        result = await conn.execute(text("SELECT column_name FROM information_schema.columns WHERE table_name = 'order_items'"))
         columns = [row[0] for row in result.fetchall()]
         print(f"   Columns in order_items: {columns}")
         
@@ -26,9 +26,7 @@ async def fix():
     print("\n2. Dropping and recreating order_items table to force sync...")
     async with engine.begin() as conn:
         # Drop the table (this deletes order data – only do in development)
-        await conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
-        await conn.execute(text("DROP TABLE IF EXISTS order_items"))
-        await conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
+        await conn.execute(text("DROP TABLE IF EXISTS order_items CASCADE"))
         # Recreate using SQLAlchemy model
         await conn.run_sync(Base.metadata.create_all)
         print("   ✅ order_items recreated with cost_price")

@@ -1,13 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_
+from sqlalchemy import select, func, and_, delete
 from sqlalchemy.orm import selectinload
 from database import get_db
 from auth import require_role, get_current_user
 from schema_manager import (
     Tenant, MenuItem, Order, OrderItem, 
     LiquorProduct, LiquorTenantStock, PurchaseInvoice, PurchaseItem, StockTransaction,
-    CashierAssignment, StockTransfer
+    CashierAssignment, StockTransfer, DailyStockReconciliation, User, CashierExpense
 )
 from pydantic import BaseModel
 from typing import List, Optional
@@ -20,7 +20,7 @@ import pdfplumber
 router = APIRouter(dependencies=[Depends(require_role("cashier"))])
 
 # ---------------------------
-# Helper to check cashier assignment
+# Helper functions
 # ---------------------------
 async def get_cashier_assignment(current_user: dict, db: AsyncSession):
     user_id = current_user["user_id"]
@@ -69,8 +69,34 @@ class StockTransferRequest(BaseModel):
     loose_bottles: int = 0
     notes: Optional[str] = None
 
+class ManualStockEntry(BaseModel):
+    product_id: str
+    cases: int = 0
+    loose_bottles: int = 0
+
+class ReconciliationItem(BaseModel):
+    product_id: str
+    receipts_cases: int
+    receipts_loose: int
+    closing_stock_physical: int
+
+class ReconciliationPayload(BaseModel):
+    date: str
+    location: str                # 'shop' or 'mart'
+    items: List[ReconciliationItem]
+    cash_total: float
+    upi_total: float
+    card_total: float
+    notes: Optional[str] = None
+
+class CashierExpenseCreate(BaseModel):
+    description: str
+    amount: float
+    category: str
+    bill_photo_url: Optional[str] = None
+
 # ========================
-# Cashier's assignments endpoint
+# Cashier assignments
 # ========================
 @router.get("/my-assignments")
 async def get_my_assignments(
@@ -184,7 +210,6 @@ async def create_order(
             if not product:
                 raise HTTPException(status_code=400, detail=f"Product not found")
             
-            # Deduct from mart stock (location='mart')
             stock_stmt = select(LiquorTenantStock).where(
                 LiquorTenantStock.tenant_id == tenant_id,
                 LiquorTenantStock.product_id == product.id,
@@ -223,7 +248,6 @@ async def get_hold_orders(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    await require_shop_assignment(current_user, db)
     tenant_id = current_user["tenant_id"]
     result = await db.execute(
         select(Order)
@@ -250,7 +274,6 @@ async def get_order_history(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    await require_shop_assignment(current_user, db)
     tenant_id = current_user["tenant_id"]
     result = await db.execute(
         select(Order).where(Order.tenant_id == tenant_id, Order.status != "hold")
@@ -392,14 +415,13 @@ async def delete_order(
 # LIQUOR MART ENDPOINTS
 # ========================
 
-# ---------- Product search (global) – requires mart assignment ----------
+# --- BRAND SEARCH (no assignment requirement) ---
 @router.get("/liquor/search-brand")
 async def search_brand(
     q: str,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    await require_mart_assignment(current_user, db)
     stmt = select(LiquorProduct).where(
         (LiquorProduct.brand_name.ilike(f"%{q}%")) | (LiquorProduct.brand_code.ilike(f"%{q}%"))
     ).distinct(LiquorProduct.brand_code, LiquorProduct.brand_name)
@@ -412,14 +434,17 @@ async def search_brand(
             unique_brands[key] = {"brand_code": p.brand_code, "brand_name": p.brand_name}
     return list(unique_brands.values())
 
+# --- SIZES (support show_all for manual stock) ---
 @router.get("/liquor/sizes/{brand_code}")
 async def get_sizes_for_brand(
     brand_code: str,
+    location: str = Query("shop", description="'shop' or 'mart'"),
+    show_all: bool = Query(False, description="If true, show all products regardless of stock"),
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    await require_mart_assignment(current_user, db)
     tenant_id = current_user["tenant_id"]
+    # Get all products for this brand
     stmt = select(LiquorProduct).where(LiquorProduct.brand_code == brand_code)
     result = await db.execute(stmt)
     products = result.scalars().all()
@@ -429,147 +454,231 @@ async def get_sizes_for_brand(
     product_ids = [p.id for p in products]
     stock_stmt = select(LiquorTenantStock).where(
         LiquorTenantStock.tenant_id == tenant_id,
-        LiquorTenantStock.location == "mart",
+        LiquorTenantStock.location == location,
         LiquorTenantStock.product_id.in_(product_ids)
     )
+    if not show_all:
+        stock_stmt = stock_stmt.where(LiquorTenantStock.current_stock > 0)
+    
     stock_result = await db.execute(stock_stmt)
     stock_map = {s.product_id: s.current_stock for s in stock_result.scalars().all()}
     
-    return [{
-        "product_id": p.id,
-        "size_code": p.size_code,
-        "size_ml": p.size_ml,
-        "mrp": p.mrp,
-        "current_stock": stock_map.get(p.id, 0),
-        "unit_cost": p.unit_cost,
-        "pack_qty": p.pack_qty
-    } for p in products]
+    result_list = []
+    for p in products:
+        if show_all or (p.id in stock_map):
+            result_list.append({
+                "product_id": p.id,
+                "size_code": p.size_code,
+                "size_ml": p.size_ml,
+                "mrp": p.mrp,
+                "current_stock": stock_map.get(p.id, 0),
+                "unit_cost": p.unit_cost,
+                "pack_qty": p.pack_qty,
+                "brand_name": p.brand_name,
+            })
+    return result_list
 
-# ---------- Daily stock with transfer columns (requires mart assignment) ----------
+# --- DAILY STOCK (supports both shop and mart, uses saved reconciliation) ---
 @router.get("/liquor/daily-stock")
 async def daily_stock(
     target_date: Optional[str] = None,
+    location: str = Query("shop", description="'shop' or 'mart'"),
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    await require_mart_assignment(current_user, db)
     tenant_id = current_user["tenant_id"]
     dt = datetime.fromisoformat(target_date).date() if target_date else date.today()
-    start_dt = datetime.combine(dt, datetime.min.time())
-    end_dt = datetime.combine(dt, datetime.max.time())
     
-    # Get all products that have any stock for this tenant (shop or mart)
-    product_stmt = select(LiquorProduct).join(
-        LiquorTenantStock, LiquorTenantStock.product_id == LiquorProduct.id
-    ).where(LiquorTenantStock.tenant_id == tenant_id).distinct()
-    result = await db.execute(product_stmt)
-    products = result.scalars().all()
+    # Get saved reconciliation for this date and location (if any)
+    saved_stmt = select(DailyStockReconciliation).where(
+        DailyStockReconciliation.tenant_id == tenant_id,
+        func.date(DailyStockReconciliation.reconciliation_date) == dt,
+        DailyStockReconciliation.location == location
+    )
+    saved_result = await db.execute(saved_stmt)
+    saved_recs = {r.product_id: r for r in saved_result.scalars().all()}
     
-    statement = []
-    for prod in products:
-        # 1. Opening stock for mart (from stock_transactions with location='mart')
-        add_before_mart = await db.execute(
-            select(func.sum(StockTransaction.total_bottles_added))
-            .where(
-                StockTransaction.product_id == prod.id,
-                StockTransaction.tenant_id == tenant_id,
-                StockTransaction.location == "mart",
-                StockTransaction.date < dt
+    # Get all products that have current stock > 0 for the given location
+    stock_stmt = select(LiquorTenantStock).where(
+        LiquorTenantStock.tenant_id == tenant_id,
+        LiquorTenantStock.location == location,
+        LiquorTenantStock.current_stock > 0
+    )
+    stock_result = await db.execute(stock_stmt)
+    tenant_stocks = stock_result.scalars().all()
+    
+    if not tenant_stocks:
+        return []
+    
+    product_ids = [ts.product_id for ts in tenant_stocks]
+    prod_stmt = select(LiquorProduct).where(LiquorProduct.id.in_(product_ids))
+    prod_result = await db.execute(prod_stmt)
+    products = {p.id: p for p in prod_result.scalars().all()}
+    
+    response = []
+    for ts in tenant_stocks:
+        prod = products.get(ts.product_id)
+        if not prod:
+            continue
+        
+        if location == "shop":
+            # Opening = total received before dt - transfers out before dt
+            total_received_before = (await db.execute(
+                select(func.coalesce(func.sum(StockTransaction.total_bottles_added), 0))
+                .where(StockTransaction.product_id == prod.id, StockTransaction.tenant_id == tenant_id,
+                       StockTransaction.location == "shop", StockTransaction.date < dt)
+            )).scalar() or 0
+            total_transferred_out_before = (await db.execute(
+                select(func.coalesce(func.sum(StockTransfer.total_bottles), 0))
+                .where(StockTransfer.from_product_id == prod.id, StockTransfer.tenant_id == tenant_id,
+                       StockTransfer.transfer_date < dt)
+            )).scalar() or 0
+            opening = total_received_before - total_transferred_out_before
+            
+            # Receipts on the day
+            rec_data = await db.execute(
+                select(func.coalesce(func.sum(StockTransaction.cases_received), 0),
+                       func.coalesce(func.sum(StockTransaction.loose_received), 0),
+                       func.coalesce(func.sum(StockTransaction.total_bottles_added), 0))
+                .where(StockTransaction.product_id == prod.id, StockTransaction.tenant_id == tenant_id,
+                       StockTransaction.location == "shop", func.date(StockTransaction.date) == dt)
             )
-        )
-        total_added_before_mart = add_before_mart.scalar() or 0
-        
-        sales_before_mart = await db.execute(
-            select(func.sum(OrderItem.quantity))
-            .join(Order, Order.id == OrderItem.order_id)
-            .where(
-                Order.tenant_id == tenant_id,
-                Order.status == "completed",
-                Order.created_at < dt,
-                OrderItem.menu_item_id == prod.id
-            )
-        )
-        total_sold_before_mart = sales_before_mart.scalar() or 0
-        
-        opening_mart = total_added_before_mart - total_sold_before_mart
-        
-        # 2. Receipts (from stock transactions) for mart on the day
-        receipts = await db.execute(
-            select(
-                func.sum(StockTransaction.cases_received).label('cases'),
-                func.sum(StockTransaction.loose_received).label('loose'),
-                func.sum(StockTransaction.total_bottles_added).label('total')
-            ).where(
-                StockTransaction.product_id == prod.id,
-                StockTransaction.tenant_id == tenant_id,
-                StockTransaction.location == "mart",
-                func.date(StockTransaction.date) == dt
-            )
-        )
-        rec = receipts.one()
-        cases_rec = rec.cases or 0
-        loose_rec = rec.loose or 0
-        total_rec = rec.total or 0
-        
-        # 3. Transfers received from shop on the day (into mart)
-        transfers_received = await db.execute(
-            select(func.sum(StockTransfer.total_bottles))
-            .where(
-                StockTransfer.to_product_id == prod.id,
-                StockTransfer.tenant_id == tenant_id,
-                func.date(StockTransfer.transfer_date) == dt
-            )
-        )
-        total_transfers_received = transfers_received.scalar() or 0
-        
-        # 4. Sales (from orders) for mart on the day
-        sales_day = await db.execute(
-            select(func.sum(OrderItem.quantity))
-            .join(Order, Order.id == OrderItem.order_id)
-            .where(
-                Order.tenant_id == tenant_id,
-                Order.status == "completed",
-                func.date(Order.created_at) == dt,
-                OrderItem.menu_item_id == prod.id
-            )
-        )
-        sale_bottles = sales_day.scalar() or 0
-        
-        # 5. Sale amount
-        revenue_day = await db.execute(
-            select(func.sum(OrderItem.unit_price * OrderItem.quantity))
-            .join(Order, Order.id == OrderItem.order_id)
-            .where(
-                Order.tenant_id == tenant_id,
-                Order.status == "completed",
-                func.date(Order.created_at) == dt,
-                OrderItem.menu_item_id == prod.id
-            )
-        )
-        sale_amount = revenue_day.scalar() or 0.0
-        
-        # Closing stock for mart = opening + receipts + transfers_received - sales
-        closing_mart = opening_mart + total_rec + total_transfers_received - sale_bottles
-        
-        statement.append({
-            "product_id": prod.id,
-            "brand_code": prod.brand_code,
-            "size_code": prod.size_code,
-            "brand_name": prod.brand_name,
-            "size_ml": prod.size_ml,
-            "opening_stock": opening_mart,
-            "receipts_cases": cases_rec,
-            "receipts_loose": loose_rec,
-            "total_receipts": total_rec,
-            "transfers_received": total_transfers_received,
-            "sale_bottles": sale_bottles,
-            "closing_stock": closing_mart,
-            "mrp": prod.mrp,
-            "sale_amount": sale_amount
-        })
-    return statement
+            cases_rec, loose_rec, total_rec = rec_data.one()
+            
+            # Transfers out on the day
+            transfers_out = (await db.execute(
+                select(func.coalesce(func.sum(StockTransfer.total_bottles), 0))
+                .where(StockTransfer.from_product_id == prod.id, StockTransfer.tenant_id == tenant_id,
+                       func.date(StockTransfer.transfer_date) == dt)
+            )).scalar() or 0
+            
+            sale_bottles = transfers_out
+            sale_amount = 0.0
+            calculated_closing = opening + total_rec - transfers_out
+            
+            # Use saved closing if exists, else calculated
+            if prod.id in saved_recs:
+                closing = saved_recs[prod.id].closing_stock_physical
+            else:
+                closing = calculated_closing
+            
+            response.append({
+                "product_id": prod.id,
+                "brand_code": prod.brand_code,
+                "brand_name": prod.brand_name,
+                "size_ml": prod.size_ml,
+                "pack_qty": prod.pack_qty,
+                "opening_stock": opening,
+                "receipts_cases": cases_rec,
+                "receipts_loose": loose_rec,
+                "total_receipts": total_rec,
+                "transfers_out": transfers_out,
+                "sale_bottles": sale_bottles,
+                "closing_stock": closing,
+                "mrp": prod.mrp,
+                "sale_amount": sale_amount,
+            })
+        else:
+            # Mart location (simplified – you can extend similarly if needed)
+            response.append({
+                "product_id": prod.id,
+                "brand_code": prod.brand_code,
+                "brand_name": prod.brand_name,
+                "size_ml": prod.size_ml,
+                "pack_qty": prod.pack_qty,
+                "opening_stock": 0,
+                "receipts_cases": 0,
+                "receipts_loose": 0,
+                "total_receipts": 0,
+                "transfers_in": 0,
+                "sale_bottles": 0,
+                "closing_stock": ts.current_stock,
+                "mrp": prod.mrp,
+                "sale_amount": 0,
+            })
+    
+    return response
 
-# ---------- Stock Transfer (shop to mart) – requires shop assignment ----------
+# --- Load saved reconciliation for a date (requires location) ---
+@router.get("/daily-stock/reconciliation")
+async def get_daily_stock_reconciliation(
+    date: str = Query(..., description="YYYY-MM-DD"),
+    location: str = Query(..., description="'shop' or 'mart'"),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    tenant_id = current_user["tenant_id"]
+    target_date = datetime.fromisoformat(date).date()
+    
+    stmt = select(DailyStockReconciliation).where(
+        DailyStockReconciliation.tenant_id == tenant_id,
+        func.date(DailyStockReconciliation.reconciliation_date) == target_date,
+        DailyStockReconciliation.location == location
+    )
+    result = await db.execute(stmt)
+    reconciliations = result.scalars().all()
+    
+    if not reconciliations:
+        return {"items": [], "cash_total": 0, "upi_total": 0, "card_total": 0}
+    
+    items = []
+    cash_total = upi_total = card_total = 0
+    for rec in reconciliations:
+        items.append({
+            "product_id": rec.product_id,
+            "receipts_cases": rec.receipts_cases,
+            "receipts_loose": rec.receipts_loose,
+            "closing_stock_physical": rec.closing_stock_physical,
+        })
+        cash_total = rec.cash_total
+        upi_total = rec.upi_total
+        card_total = rec.card_total
+    return {"items": items, "cash_total": cash_total, "upi_total": upi_total, "card_total": card_total}
+
+# --- Save or update daily stock reconciliation (uses payload.location) ---
+@router.post("/daily-stock/reconcile")
+async def save_daily_stock_reconciliation(
+    payload: ReconciliationPayload,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    tenant_id = current_user["tenant_id"]
+    cashier_id = current_user["user_id"]
+    target_date = datetime.fromisoformat(payload.date).date()
+    
+    # Delete existing entries for this date and location
+    await db.execute(
+        delete(DailyStockReconciliation).where(
+            DailyStockReconciliation.tenant_id == tenant_id,
+            func.date(DailyStockReconciliation.reconciliation_date) == target_date,
+            DailyStockReconciliation.location == payload.location
+        )
+    )
+    
+    # Insert new rows
+    for item in payload.items:
+        rec = DailyStockReconciliation(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant_id,
+            reconciliation_date=datetime.combine(target_date, datetime.min.time()),
+            product_id=item.product_id,
+            location=payload.location,
+            receipts_cases=item.receipts_cases,
+            receipts_loose=item.receipts_loose,
+            closing_stock_physical=item.closing_stock_physical,
+            cash_total=payload.cash_total,
+            upi_total=payload.upi_total,
+            card_total=payload.card_total,
+            notes=payload.notes,
+            submitted_by=cashier_id,
+            submitted_at=datetime.utcnow()
+        )
+        db.add(rec)
+    
+    await db.commit()
+    return {"message": "Reconciliation saved"}
+
+# --- Stock Transfer (shop to mart) – requires shop assignment ---
 @router.post("/stock-transfer")
 async def transfer_stock_to_mart(
     data: StockTransferRequest,
@@ -580,7 +689,6 @@ async def transfer_stock_to_mart(
     tenant_id = current_user["tenant_id"]
     cashier_id = current_user["user_id"]
     
-    # Check if tenant has a mart
     tenant = await db.get(Tenant, tenant_id)
     if not tenant or not tenant.has_mart or not tenant.mart_approved:
         raise HTTPException(status_code=400, detail="This shop does not have an approved mart")
@@ -597,7 +705,7 @@ async def transfer_stock_to_mart(
     if total_bottles == 0:
         raise HTTPException(status_code=400, detail="Must transfer at least one bottle")
     
-    # Check shop stock availability (location='shop')
+    # Check shop stock
     shop_stock_stmt = select(LiquorTenantStock).where(
         LiquorTenantStock.tenant_id == tenant_id,
         LiquorTenantStock.product_id == product.id,
@@ -611,7 +719,7 @@ async def transfer_stock_to_mart(
     # Decrease shop stock
     shop_stock.current_stock -= total_bottles
     
-    # Increase mart stock (create if not exists)
+    # Increase mart stock
     mart_stock_stmt = select(LiquorTenantStock).where(
         LiquorTenantStock.tenant_id == tenant_id,
         LiquorTenantStock.product_id == product.id,
@@ -632,7 +740,7 @@ async def transfer_stock_to_mart(
         )
         db.add(mart_stock)
     
-    # Record the transfer
+    # Log transfer
     transfer = StockTransfer(
         id=str(uuid.uuid4()),
         tenant_id=tenant_id,
@@ -657,8 +765,9 @@ async def transfer_stock_to_mart(
         "mart_new_stock": mart_stock.current_stock
     }
 
-# ---------- PDF extraction helper (unchanged) ----------
+# ---------- PDF extraction helper (PASTE YOUR ACTUAL EXTRACTION LOGIC HERE) ----------
 def extract_icdc_data(pdf_bytes: bytes) -> dict:
+    # ⚠️ REPLACE THIS WITH YOUR ACTUAL EXTRACTION LOGIC
     result = {"lines": [], "cess": 0.0, "tcs": 0.0, "invoice_number": "", "invoice_date": ""}
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         full_text = ""
@@ -668,19 +777,17 @@ def extract_icdc_data(pdf_bytes: bytes) -> dict:
             tables = page.extract_tables()
             if tables:
                 all_tables.extend(tables)
-    # ... (same extraction logic as before, no changes)
-    # (For brevity, I'm not repeating the entire function; keep your existing one)
-    # The function must remain identical to the original.
+    # TODO: your parsing code here
     return result
 
-# ---------- Preview invoice (requires shop assignment) ----------
+# ---------- Preview invoice (shop assignment) ----------
 @router.post("/liquor/upload-invoice/preview")
 async def preview_invoice(
     file: UploadFile = File(...),
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    await require_shop_assignment(current_user, db)  # changed from mart to shop
+    await require_shop_assignment(current_user, db)
     content = await file.read()
     extracted = extract_icdc_data(content)
     for line in extracted["lines"]:
@@ -705,14 +812,14 @@ async def preview_invoice(
         "tcs": extracted["tcs"]
     }
 
-# ---------- Confirm invoice (add stock to SHOP location) ----------
+# ---------- Confirm invoice (add to SHOP) ----------
 @router.post("/liquor/upload-invoice/confirm")
 async def confirm_invoice(
     payload: dict,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    await require_shop_assignment(current_user, db)  # changed from mart to shop
+    await require_shop_assignment(current_user, db)
     tenant_id = current_user["tenant_id"]
     cashier_id = current_user["user_id"]
 
@@ -758,7 +865,6 @@ async def confirm_invoice(
         )
         db.add(purchase_item)
 
-        # Update SHOP stock (location='shop')
         shop_stock_stmt = select(LiquorTenantStock).where(
             LiquorTenantStock.tenant_id == tenant_id,
             LiquorTenantStock.product_id == product.id,
@@ -779,10 +885,8 @@ async def confirm_invoice(
             )
             db.add(shop_stock)
 
-        # Update global product's unit cost
         product.unit_cost = line["unit_price"]
 
-        # Log stock transaction for shop
         trans = StockTransaction(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
@@ -802,18 +906,13 @@ async def confirm_invoice(
     return {"message": "Stock added to shop successfully", "total_bottles": sum((l["cases"] * l["pack_qty"]) + l.get("loose", 0) for l in payload["items"])}
 
 # ---------- Manual Stock Entry (add to SHOP) ----------
-class ManualStockEntry(BaseModel):
-    product_id: str
-    cases: int = 0
-    loose_bottles: int = 0
-
 @router.post("/liquor/add-stock-manual")
 async def add_stock_manual(
     data: ManualStockEntry,
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    await require_shop_assignment(current_user, db)  # changed from mart to shop
+    await require_shop_assignment(current_user, db)
     tenant_id = current_user["tenant_id"]
     cashier_id = current_user["user_id"]
     
@@ -853,7 +952,6 @@ async def add_stock_manual(
     )
     db.add(purchase_item)
     
-    # Update SHOP stock
     shop_stock_stmt = select(LiquorTenantStock).where(
         LiquorTenantStock.tenant_id == tenant_id,
         LiquorTenantStock.product_id == product.id,
@@ -896,3 +994,51 @@ async def add_stock_manual(
         "total_bottles": total_bottles,
         "new_stock": shop_stock.current_stock
     }
+
+# ========================
+# Cashier Expenses (Petty Cash)
+# ========================
+@router.get("/expenditure")
+async def get_cashier_expenses(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    tenant_id = current_user["tenant_id"]
+    stmt = select(CashierExpense).where(CashierExpense.tenant_id == tenant_id).order_by(CashierExpense.date.desc())
+    result = await db.execute(stmt)
+    expenses = result.scalars().all()
+    output = []
+    for exp in expenses:
+        cashier = await db.get(User, exp.cashier_id)
+        output.append({
+            "id": exp.id,
+            "date": exp.date.isoformat(),
+            "description": exp.description,
+            "amount": exp.amount,
+            "category": exp.category,
+            "bill_photo_url": exp.bill_photo_url,
+            "cashier_name": cashier.full_name if cashier else "Unknown"
+        })
+    return output
+
+@router.post("/expenditure")
+async def create_cashier_expense(
+    data: CashierExpenseCreate,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    tenant_id = current_user["tenant_id"]
+    cashier_id = current_user["user_id"]
+    expense = CashierExpense(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
+        cashier_id=cashier_id,
+        description=data.description,
+        amount=data.amount,
+        category=data.category,
+        bill_photo_url=data.bill_photo_url,
+        date=datetime.utcnow()
+    )
+    db.add(expense)
+    await db.commit()
+    return {"id": expense.id, "message": "Expense recorded"}

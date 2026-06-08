@@ -1,21 +1,8 @@
 import React, { useState } from 'react';
 import {
-  Box,
-  Paper,
-  Typography,
-  TextField,
-  Button,
-  Grid,
-  Card,
-  CardContent,
-  Alert,
-  Snackbar,
-  CircularProgress,
-  List,
-  ListItem,
-  ListItemText,
-  ListItemButton,
-  Divider,
+  Box, Paper, Typography, TextField, Button, Grid, Card, CardContent,
+  Alert, Snackbar, CircularProgress, List, ListItem, ListItemText,
+  ListItemButton, Divider,
 } from '@mui/material';
 import api from '../../services/api';
 
@@ -31,7 +18,6 @@ const StockTransfer = () => {
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
-  // Search brands (global)
   const handleSearch = async () => {
     if (!searchTerm.trim()) return;
     setLoading(true);
@@ -48,7 +34,6 @@ const StockTransfer = () => {
     }
   };
 
-  // Fetch all sizes for a brand (includes shop stock)
   const handleBrandSelect = async (brand) => {
     setLoading(true);
     setSelectedBrand(brand);
@@ -56,10 +41,18 @@ const StockTransfer = () => {
     setCases(0);
     setLoose(0);
     try {
-      const res = await api.get(`/cashier/liquor/sizes/${brand.brand_code}`);
-      setSizes(res.data);
+      // Request shop stock
+      const res = await api.get(`/cashier/liquor/sizes/${brand.brand_code}`, {
+        params: { location: 'shop' }
+      });
+      // Filter only sizes with stock > 0
+      const availableSizes = res.data.filter(size => size.current_stock > 0);
+      setSizes(availableSizes);
       setSearchResults([]);
       setSearchTerm('');
+      if (availableSizes.length === 0) {
+        setSnackbar({ open: true, message: 'No sizes available in shop stock', severity: 'warning' });
+      }
     } catch (err) {
       setSnackbar({ open: true, message: 'Failed to load sizes', severity: 'error' });
       setSelectedBrand(null);
@@ -68,12 +61,10 @@ const StockTransfer = () => {
     }
   };
 
-  // Choose a specific size (product)
   const handleSizeSelect = (size) => {
     setSelectedProduct(size);
   };
 
-  // Go back to brand selection
   const handleBackToBrands = () => {
     setSelectedBrand(null);
     setSizes([]);
@@ -82,7 +73,6 @@ const StockTransfer = () => {
     setSearchResults([]);
   };
 
-  // Submit stock transfer
   const handleSubmit = async () => {
     if (!selectedProduct) {
       setSnackbar({ open: true, message: 'Select a product (size) first', severity: 'warning' });
@@ -126,15 +116,12 @@ const StockTransfer = () => {
   return (
     <Box sx={{ p: 3 }}>
       <Paper sx={{ p: 3, borderRadius: 2 }}>
-        <Typography variant="h5" gutterBottom>
-          Stock Transfer (Shop → Mart)
-        </Typography>
+        <Typography variant="h5" gutterBottom>Stock Transfer (Shop → Mart)</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Transfer stock from the shop inventory to the mart. Only shop‑assigned cashiers can perform this.
         </Typography>
 
         <Grid container spacing={2}>
-          {/* Search brand – only visible when no brand selected */}
           {!selectedBrand && (
             <Grid item xs={12}>
               <TextField
@@ -150,20 +137,14 @@ const StockTransfer = () => {
             </Grid>
           )}
 
-          {/* Brand search results */}
           {!selectedBrand && searchResults.length > 0 && (
             <Grid item xs={12}>
-              <Typography variant="subtitle1" sx={{ mt: 2 }}>
-                Select a brand:
-              </Typography>
+              <Typography variant="subtitle1" sx={{ mt: 2 }}>Select a brand:</Typography>
               <List>
                 {searchResults.map((brand) => (
                   <ListItem key={brand.brand_code} disablePadding>
                     <ListItemButton onClick={() => handleBrandSelect(brand)}>
-                      <ListItemText
-                        primary={brand.brand_name}
-                        secondary={`Code: ${brand.brand_code}`}
-                      />
+                      <ListItemText primary={brand.brand_name} secondary={`Code: ${brand.brand_code}`} />
                     </ListItemButton>
                   </ListItem>
                 ))}
@@ -171,28 +152,19 @@ const StockTransfer = () => {
             </Grid>
           )}
 
-          {/* Size selection for a brand */}
           {selectedBrand && !selectedProduct && (
             <Grid item xs={12}>
               <Card variant="outlined" sx={{ p: 2 }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <Typography variant="h6">{selectedBrand.brand_name}</Typography>
-                  <Button size="small" onClick={handleBackToBrands}>
-                    Change Brand
-                  </Button>
+                  <Button size="small" onClick={handleBackToBrands}>Change Brand</Button>
                 </Box>
                 <Divider sx={{ my: 1 }} />
-                <Typography variant="subtitle2" gutterBottom>
-                  Select a size:
-                </Typography>
+                <Typography variant="subtitle2" gutterBottom>Select a size (only those with shop stock):</Typography>
                 <Grid container spacing={2}>
                   {sizes.map((size) => (
                     <Grid item xs={6} sm={4} key={size.product_id}>
-                      <Card
-                        variant="outlined"
-                        sx={{ cursor: 'pointer' }}
-                        onClick={() => handleSizeSelect(size)}
-                      >
+                      <Card variant="outlined" sx={{ cursor: 'pointer' }} onClick={() => handleSizeSelect(size)}>
                         <CardContent>
                           <Typography variant="subtitle1">{size.size_code}</Typography>
                           <Typography variant="body2">{size.size_ml} ml</Typography>
@@ -200,19 +172,19 @@ const StockTransfer = () => {
                           <Typography variant="body2">
                             Shop Stock: <strong>{size.current_stock}</strong> bottles
                           </Typography>
-                          <Typography variant="body2" fontWeight="bold">
-                            MRP: ₹{size.mrp}
-                          </Typography>
+                          <Typography variant="body2" fontWeight="bold">MRP: ₹{size.mrp}</Typography>
                         </CardContent>
                       </Card>
                     </Grid>
                   ))}
                 </Grid>
+                {sizes.length === 0 && (
+                  <Alert severity="info" sx={{ mt: 2 }}>No sizes available in shop stock for this brand.</Alert>
+                )}
               </Card>
             </Grid>
           )}
 
-          {/* Transfer form for selected product */}
           {selectedProduct && (
             <Grid item xs={12}>
               <Card variant="outlined" sx={{ p: 2, mt: 2 }}>
@@ -220,9 +192,7 @@ const StockTransfer = () => {
                   <Typography variant="h6">
                     {selectedProduct.brand_name} – {selectedProduct.size_code} ({selectedProduct.size_ml}ml)
                   </Typography>
-                  <Button size="small" onClick={() => setSelectedProduct(null)}>
-                    Change Size
-                  </Button>
+                  <Button size="small" onClick={() => setSelectedProduct(null)}>Change Size</Button>
                 </Box>
                 <Divider sx={{ my: 1 }} />
                 <Typography variant="body2" gutterBottom>
@@ -261,23 +231,10 @@ const StockTransfer = () => {
                   </Grid>
                 </Grid>
                 <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    onClick={handleSubmit}
-                    disabled={loading}
-                  >
+                  <Button variant="contained" color="primary" onClick={handleSubmit} disabled={loading}>
                     Transfer to Mart
                   </Button>
-                  <Button
-                    variant="outlined"
-                    onClick={() => {
-                      setSelectedProduct(null);
-                      setCases(0);
-                      setLoose(0);
-                      setNotes('');
-                    }}
-                  >
+                  <Button variant="outlined" onClick={() => { setSelectedProduct(null); setCases(0); setLoose(0); setNotes(''); }}>
                     Cancel
                   </Button>
                 </Box>
@@ -286,11 +243,7 @@ const StockTransfer = () => {
           )}
         </Grid>
 
-        <Snackbar
-          open={snackbar.open}
-          autoHideDuration={4000}
-          onClose={() => setSnackbar({ ...snackbar, open: false })}
-        >
+        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
           <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
         </Snackbar>
       </Paper>

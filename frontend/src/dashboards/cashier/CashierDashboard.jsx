@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Outlet, useNavigate } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
@@ -24,6 +24,7 @@ import UploadFileIcon from '@mui/icons-material/UploadFile';
 import AssessmentIcon from '@mui/icons-material/Assessment';
 import AddIcon from '@mui/icons-material/Add';
 import SwapHorizIcon from '@mui/icons-material/SwapHoriz'; // for stock transfer
+import InventoryIcon from '@mui/icons-material/Inventory'; // for daily stock
 import { useAuth } from '../../context/AuthContext';
 import { useTenant } from '../../context/TenantContext';
 import api from '../../services/api';
@@ -35,6 +36,7 @@ export default function CashierDashboard() {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const { logout } = useAuth();
   const { currentTenant } = useTenant();
   const [assignments, setAssignments] = useState({ assigned_to_shop: false, assigned_to_mart: false });
@@ -56,6 +58,22 @@ export default function CashierDashboard() {
     fetchAssignments();
   }, [currentTenant]);
 
+  const isLiquorMart = currentTenant?.business_type === 'liquor_mart';
+
+  // Handle automatic redirect if landing on base /cashier path
+  useEffect(() => {
+    if (!loading && (location.pathname === '/cashier' || location.pathname === '/cashier/')) {
+      if (assignments.assigned_to_mart) {
+        // Navigate to POS for mart cashiers (liquor mart uses liquor-pos)
+        const path = isLiquorMart ? '/cashier/liquor-pos' : '/cashier/pos';
+        navigate(path);
+      } else if (assignments.assigned_to_shop) {
+        // Shop-assigned cashiers go to daily-stock
+        navigate('/cashier/daily-stock');
+      }
+    }
+  }, [loading, location.pathname, isLiquorMart, assignments, navigate]);
+
   const handleNavigate = (path) => {
     navigate(path);
     setMobileOpen(false);
@@ -69,11 +87,19 @@ export default function CashierDashboard() {
     );
   }
 
-  const isLiquorMart = currentTenant?.business_type === 'liquor_mart';
-  // For liquor mart, we show mart‑specific items only if cashier is assigned to mart;
-  // shop‑specific items (invoice, manual stock, transfer) only if assigned to shop.
-  const showMartItems = isLiquorMart && assignments.assigned_to_mart;
-  const showShopItems = isLiquorMart && assignments.assigned_to_shop;
+  // Visibility logic according to user requirements
+  // Daily Stock: both shop and mart assigned cashiers
+  // Upload Invoice, Stock Transfer: shop‑assigned cashiers only
+  // Manual Stock: both shop and mart cashiers
+  // POS & History: mart‑assigned cashiers only (POS also visible for shop cashiers)
+  // Expenditure: both shop and mart assigned cashiers
+  const showDailyStock = assignments.assigned_to_mart || assignments.assigned_to_shop;
+  const showPOS = assignments.assigned_to_mart;
+  const showUploadInvoice = assignments.assigned_to_shop;
+  const showStockTransfer = assignments.assigned_to_shop;
+  const showManualStock = assignments.assigned_to_mart || assignments.assigned_to_shop;
+  const showHistory = isLiquorMart && assignments.assigned_to_mart;
+  const showExpenditure = assignments.assigned_to_mart || assignments.assigned_to_shop;
 
   const drawer = (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -83,58 +109,76 @@ export default function CashierDashboard() {
         </Typography>
       </Box>
 
-      <List sx={{ flexGrow: 1 }}>
-        {/* POS – only if assigned to mart */}
-        {showMartItems && (
-          <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNavigate('/cashier/liquor-pos')}>
-              <ListItemIcon><PointOfSaleIcon /></ListItemIcon>
-              <ListItemText primary="POS" />
-            </ListItemButton>
-          </ListItem>
-        )}
+        <List sx={{ flexGrow: 1 }}>
+          {/* POS */}
+          {showPOS && (
+            <ListItem disablePadding>
+              <ListItemButton onClick={() => handleNavigate(isLiquorMart ? '/cashier/liquor-pos' : '/cashier/pos')}>
+                <ListItemIcon><PointOfSaleIcon /></ListItemIcon>
+                <ListItemText primary="POS" />
+              </ListItemButton>
+            </ListItem>
+          )}
 
-        {/* Shop‑only features */}
-        {showShopItems && (
-          <>
+          {/* Upload Invoice – shop only */}
+          {showUploadInvoice && (
             <ListItem disablePadding>
               <ListItemButton onClick={() => handleNavigate('/cashier/upload-invoice')}>
                 <ListItemIcon><UploadFileIcon /></ListItemIcon>
                 <ListItemText primary="Upload Invoice" />
               </ListItemButton>
             </ListItem>
+          )}
+
+          {/* Daily Stock – both shop and mart */}
+          {showDailyStock && (
+            <ListItem disablePadding>
+              <ListItemButton onClick={() => handleNavigate('/cashier/daily-stock')}>
+                <ListItemIcon><InventoryIcon /></ListItemIcon>
+                <ListItemText primary="Daily Stock" />
+              </ListItemButton>
+            </ListItem>
+          )}
+
+          {/* Manual Stock – both shop and mart */}
+          {showManualStock && (
             <ListItem disablePadding>
               <ListItemButton onClick={() => handleNavigate('/cashier/manual-stock')}>
                 <ListItemIcon><AddIcon /></ListItemIcon>
                 <ListItemText primary="Manual Stock" />
               </ListItemButton>
             </ListItem>
+          )}
+
+          {/* Stock Transfer – shop only */}
+          {showStockTransfer && (
             <ListItem disablePadding>
               <ListItemButton onClick={() => handleNavigate('/cashier/stock-transfer')}>
                 <ListItemIcon><SwapHorizIcon /></ListItemIcon>
                 <ListItemText primary="Stock Transfer" />
               </ListItemButton>
             </ListItem>
-          </>
-        )}
+          )}
 
-        {/* Daily stock – only if assigned to mart */}
-        {showMartItems && (
+        {/* Expenditure – both shop and mart */}
+        {showExpenditure && (
           <ListItem disablePadding>
-            <ListItemButton onClick={() => handleNavigate('/cashier/daily-stock')}>
+            <ListItemButton onClick={() => handleNavigate('/cashier/expenditure')}>
               <ListItemIcon><AssessmentIcon /></ListItemIcon>
-              <ListItemText primary="Daily Stock" />
+              <ListItemText primary="Expenditure" />
             </ListItemButton>
           </ListItem>
         )}
 
-        {/* Order History – common for all cashiers */}
-        <ListItem disablePadding>
-          <ListItemButton onClick={() => handleNavigate('/cashier/history')}>
-            <ListItemIcon><HistoryIcon /></ListItemIcon>
-            <ListItemText primary="History" />
-          </ListItemButton>
-        </ListItem>
+        {/* Order History – mart only */}
+        {showHistory && (
+          <ListItem disablePadding>
+            <ListItemButton onClick={() => handleNavigate('/cashier/history')}>
+              <ListItemIcon><HistoryIcon /></ListItemIcon>
+              <ListItemText primary="History" />
+            </ListItemButton>
+          </ListItem>
+        )}
       </List>
 
       <List>

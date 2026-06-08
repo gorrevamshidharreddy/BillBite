@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 export default function ProtectedRoute({ children, allowedRole }) {
   const { token, user } = useAuth();
-  const { currentTenant, availableTenants, setCurrentTenant } = useTenant();
+  const { currentTenant, availableTenants, setCurrentTenant, loading: tenantLoading } = useTenant();
   const [autoRedirecting, setAutoRedirecting] = useState(false);
 
   // No token → not logged in
@@ -13,8 +13,8 @@ export default function ProtectedRoute({ children, allowedRole }) {
     return <Navigate to="/login" />;
   }
 
-  // User data still loading
-  if (!user) {
+  // User data or tenant data still loading
+  if (!user || tenantLoading) {
     return <div>Loading...</div>;
   }
 
