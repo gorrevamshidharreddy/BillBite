@@ -25,13 +25,8 @@ export default function LoginPage() {
 
       if (dashboardRole === 'admin') {
         navigate('/admin');
-        return;
-      }
-
-      if (tenantCount === 1) {
-        navigate(`/${dashboardRole}`);
       } else {
-        navigate('/select-tenant');
+        navigate(`/${dashboardRole}`);
       }
     } catch (err) {
       setError('Invalid email or password');

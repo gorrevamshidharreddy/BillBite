@@ -4,7 +4,7 @@ import {
   IconButton, Tooltip, Alert, CircularProgress, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TableSortLabel, TablePagination,
   InputAdornment, Dialog, DialogTitle, DialogContent, DialogActions,
-  Snackbar,
+  Snackbar, FormControl, InputLabel, Select, MenuItem,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon, Download as DownloadIcon, Search as SearchIcon,
@@ -15,7 +15,7 @@ import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
 import api from '../../services/api';
 import { useTenant } from '../../context/TenantContext';
 
-const DailyStock = () => {
+const DailyStock = ({ isOwnerView = false }) => {
   const { currentTenant } = useTenant();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -38,6 +38,11 @@ const DailyStock = () => {
   // Fetch assignment
   useEffect(() => {
     const fetchAssignment = async () => {
+      if (isOwnerView) {
+        setLocation('shop');
+        setAssignmentsLoaded(true);
+        return;
+      }
       try {
         const res = await api.get('/cashier/my-assignments');
         if (res.data.assigned_to_shop) setLocation('shop');
@@ -50,7 +55,7 @@ const DailyStock = () => {
       }
     };
     fetchAssignment();
-  }, []);
+  }, [isOwnerView]);
 
   const checkEditable = useCallback((date) => {
     const now = new Date();
@@ -246,6 +251,22 @@ const DailyStock = () => {
               Daily Stock ({location === 'shop' ? 'Shop' : 'Mart'}) {editMode ? '(Editing)' : '(View)'}
             </Typography>
             <Box sx={{ display: 'flex', gap: 1 }}>
+              {isOwnerView && currentTenant?.has_mart && (
+                <FormControl size="small" sx={{ minWidth: 120 }}>
+                  <InputLabel>Location</InputLabel>
+                  <Select
+                    value={location}
+                    label="Location"
+                    onChange={(e) => {
+                       setLocation(e.target.value);
+                       setEditMode(false);
+                    }}
+                  >
+                    <MenuItem value="shop">Shop</MenuItem>
+                    <MenuItem value="mart">Mart</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
               <DatePicker
                 label="Select Date"
                 value={selectedDate}

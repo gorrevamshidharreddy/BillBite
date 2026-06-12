@@ -1,6 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import LoginPage from './dashboards/LoginPage';
-import TenantSelection from './dashboards/TenantSelection';
 import AdminDashboard from './dashboards/admin/AdminDashboard';
 import OwnerDashboard from './dashboards/owner/OwnerDashboard';
 import CashierDashboard from './dashboards/cashier/CashierDashboard';
@@ -8,11 +7,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import { useTenant } from './context/TenantContext';
 
 const OwnerIndexRedirect = () => {
-  const { currentTenant } = useTenant();
-  if (currentTenant?.business_type === 'liquor_mart') {
-    return <Navigate to="liquor/stock-verification" />;
-  }
-  return <Navigate to="stock" />;
+  return <Navigate to="liquor/daily-stock" />;
 };
 
 // Admin sub-pages
@@ -22,9 +17,6 @@ import PlatformAnalytics from './dashboards/admin/PlatformAnalytics';
 import Subscription from './dashboards/admin/Subscription';
 import SupportTickets from './dashboards/admin/SupportTickets';
 
-// Owner sub-pages (Restaurant)
-import MenuManagement from './dashboards/owner/MenuManagement';
-import StockManagement from './dashboards/owner/StockManagement';
 import ExpenseLog from './dashboards/owner/ExpenseLog';
 import StaffManagement from './dashboards/owner/StaffManagement';
 import Reports from './dashboards/owner/Reports';
@@ -32,8 +24,7 @@ import Reports from './dashboards/owner/Reports';
 // Owner sub-pages (Liquor)
 import LiquorOwnerTab from './dashboards/owner/LiquorOwnerTab';
 
-// Cashier sub-pages (Restaurant)
-import POS from './dashboards/cashier/POS';
+// Cashier sub-pages
 import OrderHistory from './dashboards/cashier/OrderHistory';
 
 // Cashier sub-pages (Liquor)
@@ -48,7 +39,6 @@ function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/select-tenant" element={<TenantSelection />} />
 
       {/* Admin routes */}
       <Route path="/admin" element={<ProtectedRoute allowedRole="admin"><AdminDashboard /></ProtectedRoute>}>
@@ -62,14 +52,11 @@ function App() {
 
       {/* Owner routes */}
       <Route path="/owner" element={<ProtectedRoute allowedRole="owner"><OwnerDashboard /></ProtectedRoute>}>
-        {/* Restaurant */}
-        <Route path="menu" element={<MenuManagement />} />
-        <Route path="stock" element={<StockManagement />} />
         <Route path="expenses" element={<ExpenseLog />} />
         <Route path="staff" element={<StaffManagement />} />
         <Route path="reports" element={<Reports />} />
         {/* Liquor */}
-        <Route path="liquor/stock-verification" element={<LiquorOwnerTab />} />
+        <Route path="liquor/daily-stock" element={<DailyStock isOwnerView={true} />} />
         <Route path="liquor/profit-loss" element={<LiquorOwnerTab />} />
         <Route path="liquor/analytics" element={<LiquorOwnerTab />} />
         <Route index element={<OwnerIndexRedirect />} />
@@ -77,8 +64,6 @@ function App() {
 
       {/* Cashier routes */}
       <Route path="/cashier/*" element={<ProtectedRoute allowedRole="cashier"><CashierDashboard /></ProtectedRoute>}>
-          {/* Restaurant */}
-          <Route path="pos" element={<POS />} />
           {/* Liquor */}
           <Route path="liquor-pos" element={<LiquorPOS />} />
           <Route path="upload-invoice" element={<UploadInvoice />} />

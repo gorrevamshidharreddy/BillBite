@@ -18,6 +18,10 @@ import {
   Snackbar,
   IconButton,
   Tooltip,
+  Select,
+  MenuItem,
+  FormControl,
+  InputLabel,
 } from '@mui/material';
 import {
   Add as AddIcon,
@@ -36,6 +40,7 @@ export default function StaffManagement() {
     full_name: '',
     phone: '',
     password: '',
+    role: 'cashier',
   });
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -86,8 +91,8 @@ export default function StaffManagement() {
     setLoading(true);
     try {
       await api.post('/owner/staff', form);
-      setForm({ email: '', full_name: '', phone: '', password: '' });
-      setSnackbar({ open: true, message: 'Cashier created successfully', severity: 'success' });
+      setForm({ email: '', full_name: '', phone: '', password: '', role: 'cashier' });
+      setSnackbar({ open: true, message: 'Staff created successfully', severity: 'success' });
       fetchStaffAndAssignments();
     } catch (err) {
       const detail = err.response?.data?.detail || err.message || 'Failed to create cashier';
@@ -162,10 +167,23 @@ export default function StaffManagement() {
         {/* Create Cashier Form */}
         <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: '#f9f9f9' }}>
           <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-            Add New Cashier
+            Add New Staff Member
           </Typography>
           <Grid container spacing={2}>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={12} sm={6} md={2}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Role</InputLabel>
+                <Select
+                  value={form.role}
+                  label="Role"
+                  onChange={(e) => setForm({ ...form, role: e.target.value })}
+                >
+                  <MenuItem value="cashier">Cashier</MenuItem>
+                  <MenuItem value="co_owner">Co-Owner</MenuItem>
+                </Select>
+              </FormControl>
+            </Grid>
+            <Grid item xs={12} sm={6} md={2}>
               <TextField
                 fullWidth
                 label="Email"
@@ -175,7 +193,7 @@ export default function StaffManagement() {
                 required
               />
             </Grid>
-            <Grid item xs={12} sm={6} md={3}>
+            <Grid item xs={12} sm={6} md={2}>
               <TextField
                 fullWidth
                 label="Full Name"
@@ -213,7 +231,7 @@ export default function StaffManagement() {
                 // disabled={loading}
                 startIcon={<AddIcon />}
               >
-                Create Cashier
+                Create Staff
               </Button>
             </Grid>
           </Grid>
@@ -225,6 +243,7 @@ export default function StaffManagement() {
             <TableHead sx={{ bgcolor: '#f5f5f5' }}>
               <TableRow>
                 <TableCell><strong>Email</strong></TableCell>
+                <TableCell><strong>Role</strong></TableCell>
                 <TableCell><strong>Full Name</strong></TableCell>
                 <TableCell><strong>Phone</strong></TableCell>
                 {isLiquorMart && <TableCell align="center"><strong>Shop</strong></TableCell>}
@@ -237,24 +256,33 @@ export default function StaffManagement() {
               {staff.map((cashier) => (
                 <TableRow key={cashier.id} hover>
                   <TableCell>{cashier.email}</TableCell>
+                  <TableCell>{cashier.role === 'co_owner' ? 'Co-Owner' : 'Cashier'}</TableCell>
                   <TableCell>{cashier.full_name}</TableCell>
                   <TableCell>{cashier.phone || '—'}</TableCell>
                   {isLiquorMart && (
                     <TableCell align="center">
-                      <Switch
-                        checked={assignments[cashier.id]?.assigned_to_shop ?? false}
-                        onChange={() => handleAssignmentToggle(cashier.id, 'assigned_to_shop')}
-                        size="small"
-                      />
+                      {cashier.role === 'cashier' ? (
+                        <Switch
+                          checked={assignments[cashier.id]?.assigned_to_shop ?? false}
+                          onChange={() => handleAssignmentToggle(cashier.id, 'assigned_to_shop')}
+                          size="small"
+                        />
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">Full Access</Typography>
+                      )}
                     </TableCell>
                   )}
                   {isLiquorMart && (
                     <TableCell align="center">
-                      <Switch
-                        checked={assignments[cashier.id]?.assigned_to_mart ?? false}
-                        onChange={() => handleAssignmentToggle(cashier.id, 'assigned_to_mart')}
-                        size="small"
-                      />
+                      {cashier.role === 'cashier' ? (
+                        <Switch
+                          checked={assignments[cashier.id]?.assigned_to_mart ?? false}
+                          onChange={() => handleAssignmentToggle(cashier.id, 'assigned_to_mart')}
+                          size="small"
+                        />
+                      ) : (
+                        <Typography variant="caption" color="text.secondary">Full Access</Typography>
+                      )}
                     </TableCell>
                   )}
                   <TableCell align="center">
@@ -284,8 +312,8 @@ export default function StaffManagement() {
               ))}
               {staff.length === 0 && !loading && (
                 <TableRow>
-                  <TableCell colSpan={isLiquorMart ? 7 : 5} align="center">
-                    <Typography color="text.secondary">No cashiers found.</Typography>
+                  <TableCell colSpan={isLiquorMart ? 8 : 6} align="center">
+                    <Typography color="text.secondary">No staff found.</Typography>
                   </TableCell>
                 </TableRow>
               )}
