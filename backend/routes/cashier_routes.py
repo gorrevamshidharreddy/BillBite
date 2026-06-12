@@ -16,8 +16,7 @@ import uuid
 import io
 import re
 import pdfplumber
-
-router = APIRouter(dependencies=[Depends(require_role("cashier"))])
+router = APIRouter(dependencies=[Depends(require_role(["cashier", "owner"]))])
 
 # ---------------------------
 # Helper functions

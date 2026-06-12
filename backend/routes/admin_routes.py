@@ -23,6 +23,7 @@ class TenantCreate(BaseModel):
     owner_email: EmailStr
     owner_password: str
     business_type: str = "restaurant"   # 'restaurant' or 'liquor_mart'
+    shop_number: Optional[str] = None
 
 class TenantOut(BaseModel):
     id: str
@@ -34,6 +35,8 @@ class TenantOut(BaseModel):
     status: str
     created_at: Optional[datetime]
     business_type: Optional[str]
+    shop_number: Optional[str]
+    owner_name: Optional[str]
 
 class MartRequestOut(BaseModel):
     id: str
@@ -65,6 +68,16 @@ async def create_tenant(data: TenantCreate, db: AsyncSession = Depends(get_db)):
     # Ensure business_type is valid
     if data.business_type not in ["restaurant", "liquor_mart"]:
         raise HTTPException(status_code=400, detail="business_type must be 'restaurant' or 'liquor_mart'")
+    if data.business_type == "liquor_mart" and not data.shop_number:
+        raise HTTPException(status_code=400, detail="Shop number is required for liquor mart")
+    if data.shop_number and not data.shop_number.isdigit():
+        raise HTTPException(status_code=400, detail="Shop number must contain only numbers")
+    if not data.owner_full_name.replace(" ", "").isalpha():
+        raise HTTPException(status_code=400, detail="Owner name must contain only characters")
+    if not (data.phone.isdigit() and len(data.phone) == 10):
+        raise HTTPException(status_code=400, detail="Phone number must be exactly 10 digits")
+    if not data.owner_email.endswith("@gmail.com"):
+        raise HTTPException(status_code=400, detail="Owner email must be a @gmail.com address")
 
     tenant = Tenant(
         name=data.hotel_name,
@@ -73,6 +86,7 @@ async def create_tenant(data: TenantCreate, db: AsyncSession = Depends(get_db)):
         address=data.address,
         date_of_joining=datetime.fromisoformat(data.date_of_joining) if data.date_of_joining else datetime.utcnow(),
         business_type=data.business_type,
+        shop_number=data.shop_number,
     )
     db.add(tenant)
     await db.flush()
@@ -89,12 +103,16 @@ async def create_tenant(data: TenantCreate, db: AsyncSession = Depends(get_db)):
 
     return {"tenant_id": tenant.id, "owner_id": owner.id}
 
+from sqlalchemy.orm import selectinload
+
 @router.get("/tenants", dependencies=[Depends(require_role("admin"))])
 async def list_tenants(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Tenant))
+    result = await db.execute(select(Tenant).options(selectinload(Tenant.users)))
     tenants = result.scalars().all()
-    return [
-        {
+    output = []
+    for t in tenants:
+        owner = next((u for u in t.users if u.role == "owner"), None)
+        output.append({
             "id": t.id,
             "name": t.name,
             "email": t.email,
@@ -104,13 +122,14 @@ async def list_tenants(db: AsyncSession = Depends(get_db)):
             "status": t.status,
             "created_at": t.created_at,
             "business_type": t.business_type,
+            "shop_number": t.shop_number,
             "has_mart": t.has_mart,
             "mart_approved": t.mart_approved,
             "mart_name": t.mart_name,
             "mart_address": t.mart_address,
-        }
-        for t in tenants
-    ]
+            "owner_name": owner.full_name if owner else "Unknown",
+        })
+    return output
 
 @router.delete("/tenants/{tenant_id}", dependencies=[Depends(require_role("admin"))])
 async def delete_tenant(tenant_id: str, db: AsyncSession = Depends(get_db)):

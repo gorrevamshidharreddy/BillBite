@@ -22,6 +22,7 @@ class Tenant(Base):
     status = Column(String(50), default="active")
     created_at = Column(DateTime, default=datetime.utcnow)
     business_type = Column(Enum('restaurant', 'liquor_mart', native_enum=False, length=50), default='restaurant', nullable=False)
+    shop_number = Column(String(50), nullable=True)
     
     # Mart fields
     has_mart = Column(Boolean, default=False)

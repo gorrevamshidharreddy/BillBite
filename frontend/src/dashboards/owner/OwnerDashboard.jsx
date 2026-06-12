@@ -28,7 +28,6 @@ import {
 } from '@mui/material';
 import api from '../../services/api';
 import MenuIcon from '@mui/icons-material/Menu';
-import RestaurantMenuIcon from '@mui/icons-material/RestaurantMenu';
 import InventoryIcon from '@mui/icons-material/Inventory';
 import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import PeopleAltIcon from '@mui/icons-material/PeopleAlt';
@@ -42,18 +41,9 @@ import TenantSwitcher from '../../components/TenantSwitcher';
 
 const drawerWidth = 240;
 
-// Navigation items for Restaurant
-const restaurantNavItems = [
-  { text: 'Menu', icon: <RestaurantMenuIcon />, path: '/owner/menu' },
-  { text: 'Stock', icon: <InventoryIcon />, path: '/owner/stock' },
-  { text: 'Expenses', icon: <AttachMoneyIcon />, path: '/owner/expenses' },
-  { text: 'Staff', icon: <PeopleAltIcon />, path: '/owner/staff' },
-  { text: 'Reports', icon: <AssessmentIcon />, path: '/owner/reports' },
-];
-
 // Navigation items for Liquor Mart
 const liquorNavItems = [
-  { text: 'Stock Verification', icon: <InventoryIcon />, path: '/owner/liquor/stock-verification' },
+  { text: 'Daily Stock', icon: <InventoryIcon />, path: '/owner/liquor/daily-stock' },
   { text: 'Profit & Loss', icon: <AttachMoneyIcon />, path: '/owner/liquor/profit-loss' },
   { text: 'Analytics', icon: <TrendingUpIcon />, path: '/owner/liquor/analytics' },
   { text: 'Expenses', icon: <AttachMoneyIcon />, path: '/owner/expenses' },
@@ -78,7 +68,7 @@ export default function OwnerDashboard() {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
 
   const isLiquorMart = currentTenant?.business_type === 'liquor_mart';
-  const navItems = isLiquorMart ? liquorNavItems : restaurantNavItems;
+  const navItems = liquorNavItems;
 
   const fetchTenantDetails = async () => {
     try {
@@ -147,9 +137,9 @@ export default function OwnerDashboard() {
           BillBite
         </Typography>
         <Chip
-          label={isLiquorMart ? 'Liquor Mart' : 'Restaurant'}
+          label="Liquor Mart"
           size="small"
-          color={isLiquorMart ? 'warning' : 'info'}
+          color="warning"
           sx={{ mt: 1 }}
         />
       </Box>
@@ -197,7 +187,7 @@ export default function OwnerDashboard() {
             </IconButton>
           )}
           <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-            {isLiquorMart ? 'Liquor Mart Dashboard' : 'Restaurant Dashboard'}
+            Liquor Mart Dashboard
           </Typography>
           <TenantSwitcher />
         </Toolbar>

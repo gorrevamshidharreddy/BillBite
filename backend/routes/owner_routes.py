@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 from database import get_db
 from auth import get_current_owner, hash_password
 from schema_manager import (
-    MenuItem, Category, PackagedStock, StockMovement,
+
     RawMaterialExpense, OtherExpense, User, Order, OrderItem,
     LiquorProduct, LiquorTenantStock, PurchaseInvoice, PurchaseItem, StockTransaction,
     Tenant, CoOwnerPermission, CashierAssignment, MartRequest,
@@ -64,12 +64,14 @@ class StaffCreate(BaseModel):
     full_name: str
     password: str
     phone: Optional[str] = None   # added phone
+    role: str = "cashier"
 
 class StaffUpdate(BaseModel):
     full_name: Optional[str] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
     phone: Optional[str] = None
+    role: Optional[str] = None
 
 # NEW Schemas
 class CoOwnerCreate(BaseModel):
@@ -364,7 +366,7 @@ async def create_other_expense(data: OtherExpenseCreate, current_owner: dict = D
 async def get_staff(current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
     tenant_id = current_owner["tenant_id"]
     result = await db.execute(
-        select(User).where(User.tenant_id == tenant_id, User.role == "cashier")
+        select(User).where(User.tenant_id == tenant_id, User.role.in_(["cashier", "co_owner"]))
     )
     cashiers = result.scalars().all()
     return [
@@ -373,6 +375,7 @@ async def get_staff(current_owner: dict = Depends(get_current_owner), db: AsyncS
             "email": c.email,
             "full_name": c.full_name,
             "phone": c.phone,
+            "role": c.role,
             "is_active": c.is_active,
         }
         for c in cashiers
@@ -388,7 +391,7 @@ async def create_staff(data: StaffCreate, current_owner: dict = Depends(get_curr
         tenant_id=tenant_id,
         email=data.email,
         hashed_password=hash_password(data.password),
-        role="cashier",
+        role=data.role,
         full_name=data.full_name,
         phone=data.phone,
     )
@@ -413,7 +416,7 @@ async def update_staff(user_id: str, data: StaffUpdate, current_owner: dict = De
         select(User).where(
             User.id == user_id,
             User.tenant_id == tenant_id,
-            User.role == "cashier"
+            User.role.in_(["cashier", "co_owner"])
         )
     )
     cashier = result.scalar_one_or_none()
@@ -427,6 +430,8 @@ async def update_staff(user_id: str, data: StaffUpdate, current_owner: dict = De
         cashier.is_active = data.is_active
     if data.phone is not None:
         cashier.phone = data.phone
+    if data.role is not None:
+        cashier.role = data.role
     await db.commit()
     return {"message": "Staff updated"}
 
@@ -437,7 +442,7 @@ async def delete_staff(user_id: str, current_owner: dict = Depends(get_current_o
         select(User).where(
             User.id == user_id,
             User.tenant_id == tenant_id,
-            User.role == "cashier"
+            User.role.in_(["cashier", "co_owner"])
         )
     )
     cashier = result.scalar_one_or_none()

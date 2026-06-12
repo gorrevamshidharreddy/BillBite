@@ -23,25 +23,41 @@ import {
   Select,
   MenuItem,
   Chip,
+  Divider,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import StorefrontIcon from '@mui/icons-material/Storefront';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import EditIcon from '@mui/icons-material/Edit';
+import InfoIcon from '@mui/icons-material/Info';
 
 export default function TenantManagement() {
   const [tenants, setTenants] = useState([]);
   const [form, setForm] = useState({
     hotel_name: '',
-    email: '',
     phone: '',
     address: '',
     date_of_joining: '',
     owner_full_name: '',
     owner_email: '',
     owner_password: '',
-    business_type: 'restaurant',
+    business_type: 'liquor_mart',
+    shop_number: '',
   });
   const [message, setMessage] = useState('');
   const [openDialog, setOpenDialog] = useState(false);
+  const [viewTenant, setViewTenant] = useState(null);
+  const [openViewDialog, setOpenViewDialog] = useState(false);
+
+  const handleView = (t) => {
+    setViewTenant(t);
+    setOpenViewDialog(true);
+  };
+
+  const handleEdit = (t) => {
+    setViewTenant(t);
+    setOpenViewDialog(true);
+  };
 
   useEffect(() => { fetchTenants(); }, []);
 
@@ -57,9 +73,9 @@ export default function TenantManagement() {
       await api.post('/admin/tenants', form);
       setMessage('Tenant created successfully!');
       setForm({
-        hotel_name: '', email: '', phone: '', address: '',
+        hotel_name: '', phone: '', address: '',
         date_of_joining: '', owner_full_name: '', owner_email: '', owner_password: '',
-        business_type: 'restaurant',
+        business_type: 'liquor_mart', shop_number: '',
       });
       setOpenDialog(false);
       fetchTenants();
@@ -102,57 +118,57 @@ export default function TenantManagement() {
         <Button variant="contained" onClick={() => setOpenDialog(true)}>Add New Business</Button>
       </Box>
 
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Register New Business</DialogTitle>
-        <DialogContent>
-          <Grid container spacing={2} sx={{ mt: 1 }}>
-            <Grid item xs={12} md={6}>
-              <FormControl fullWidth required>
-                <InputLabel>Business Type</InputLabel>
-                <Select
-                  name="business_type"
-                  value={form.business_type}
-                  label="Business Type"
-                  onChange={handleChange}
-                >
-                  <MenuItem value="restaurant">Restaurant / Food Counter</MenuItem>
-                  <MenuItem value="liquor_mart">Liquor Mart</MenuItem>
-                </Select>
-              </FormControl>
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: 3, padding: 1 } }}>
+        <DialogTitle sx={{ fontWeight: 700, fontSize: '1.5rem', color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
+          <StorefrontIcon fontSize="large" /> Register New Liquor Mart
+        </DialogTitle>
+        <Divider sx={{ mb: 2 }} />
+        <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}>
+          <DialogContent>
+            {/* Business Details Section */}
+            <Typography variant="h6" sx={{ mb: 3, fontWeight: 600, color: 'text.secondary' }}>
+              Business Information
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={6}>
+                <TextField fullWidth label="Shop Number / Gazeet Number" name="shop_number" value={form.shop_number} onChange={handleChange} required inputProps={{ pattern: "[0-9]*" }} helperText="Only numbers allowed" />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField fullWidth label="Shop Name" name="hotel_name" value={form.hotel_name} onChange={handleChange} required />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField fullWidth label="Phone" name="phone" value={form.phone} onChange={handleChange} required inputProps={{ pattern: "[0-9]{10}", maxLength: 10 }} helperText="10 digits only" />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField fullWidth label="Address" name="address" value={form.address} onChange={handleChange} required />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField fullWidth type="date" label="Date of Joining" name="date_of_joining" value={form.date_of_joining} onChange={handleChange} InputLabelProps={{ shrink: true }} />
+              </Grid>
             </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField fullWidth label="Business Name" name="hotel_name" value={form.hotel_name} onChange={handleChange} required />
+
+            {/* Owner Details Section */}
+            <Divider sx={{ my: 4 }} />
+            <Typography variant="h6" sx={{ mb: 3, fontWeight: 600, color: 'text.secondary' }}>
+              Owner Credentials
+            </Typography>
+            <Grid container spacing={3}>
+              <Grid item xs={12} md={4}>
+                <TextField fullWidth label="Owner Full Name" name="owner_full_name" value={form.owner_full_name} onChange={handleChange} required inputProps={{ pattern: "[A-Za-z ]+" }} helperText="Only characters" />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <TextField fullWidth type="email" label="Owner Email" name="owner_email" value={form.owner_email} onChange={handleChange} required inputProps={{ pattern: ".*@gmail\\.com" }} helperText="Must be @gmail.com" />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <TextField fullWidth type="password" label="Owner Password" name="owner_password" value={form.owner_password} onChange={handleChange} required />
+              </Grid>
             </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField fullWidth label="Business Email" name="email" value={form.email} onChange={handleChange} />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField fullWidth label="Phone" name="phone" value={form.phone} onChange={handleChange} required />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField fullWidth label="Address" name="address" value={form.address} onChange={handleChange} required />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField fullWidth type="date" label="Date of Joining" name="date_of_joining" value={form.date_of_joining} onChange={handleChange} InputLabelProps={{ shrink: true }} />
-            </Grid>
-            <Grid item xs={12}>
-              <Typography variant="subtitle1" mt={2}>Owner Account</Typography>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField fullWidth label="Owner Full Name" name="owner_full_name" value={form.owner_full_name} onChange={handleChange} required />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField fullWidth label="Owner Email" name="owner_email" value={form.owner_email} onChange={handleChange} required />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <TextField fullWidth type="password" label="Owner Password" name="owner_password" value={form.owner_password} onChange={handleChange} required />
-            </Grid>
-          </Grid>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setOpenDialog(false)}>Cancel</Button>
-          <Button variant="contained" onClick={handleSubmit}>Register</Button>
-        </DialogActions>
+          </DialogContent>
+          <DialogActions sx={{ px: 3, pb: 3 }}>
+            <Button onClick={() => setOpenDialog(false)} sx={{ borderRadius: 2, px: 3, fontWeight: 600 }}>Cancel</Button>
+            <Button type="submit" variant="contained" sx={{ borderRadius: 2, px: 4, py: 1, fontWeight: 600, boxShadow: 2 }}>Register Liquor Mart</Button>
+          </DialogActions>
+        </form>
       </Dialog>
 
       {message && <Typography color="primary" sx={{ mb: 2 }}>{message}</Typography>}
@@ -161,29 +177,21 @@ export default function TenantManagement() {
         <Table>
           <TableHead>
             <TableRow>
-              <TableCell>Business Name</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell>Mart Status</TableCell>
-              <TableCell>Mart Name</TableCell>
-              <TableCell>Email</TableCell>
-              <TableCell>Phone</TableCell>
-              <TableCell>Address</TableCell>
-              <TableCell>Date Joined</TableCell>
-              <TableCell>Status</TableCell>
-              <TableCell>Action</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Shop Number</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Shop Name</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Mart Status</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Owner Name</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Phone</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Date Joined</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
+              <TableCell sx={{ fontWeight: 600 }}>Actions</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {tenants.map((t) => (
               <TableRow key={t.id}>
+                <TableCell>{t.shop_number || '-'}</TableCell>
                 <TableCell>{t.name}</TableCell>
-                <TableCell>
-                  <Chip
-                    label={getBusinessTypeLabel(t.business_type)}
-                    color={getBusinessTypeColor(t.business_type)}
-                    size="small"
-                  />
-                </TableCell>
                 <TableCell>
                   <Chip
                     label={getMartStatusLabel(t)}
@@ -192,13 +200,13 @@ export default function TenantManagement() {
                     icon={t.has_mart ? <StorefrontIcon /> : undefined}
                   />
                 </TableCell>
-                <TableCell>{t.mart_name || '-'}</TableCell>
-                <TableCell>{t.email}</TableCell>
+                <TableCell>{t.owner_name}</TableCell>
                 <TableCell>{t.phone}</TableCell>
-                <TableCell>{t.address}</TableCell>
                 <TableCell>{t.date_of_joining ? new Date(t.date_of_joining).toLocaleDateString() : ''}</TableCell>
                 <TableCell>{t.status}</TableCell>
                 <TableCell>
+                  <IconButton onClick={() => handleView(t)} color="primary"><VisibilityIcon /></IconButton>
+                  <IconButton onClick={() => handleEdit(t)} color="info"><EditIcon /></IconButton>
                   <IconButton onClick={() => handleDelete(t.id)} color="error"><DeleteIcon /></IconButton>
                 </TableCell>
               </TableRow>
@@ -206,6 +214,32 @@ export default function TenantManagement() {
           </TableBody>
         </Table>
       </TableContainer>
+
+      {/* View Details Dialog */}
+      <Dialog open={openViewDialog} onClose={() => setOpenViewDialog(false)} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3, padding: 1 } }}>
+        <DialogTitle sx={{ fontWeight: 700, fontSize: '1.5rem', color: 'primary.main', display: 'flex', alignItems: 'center', gap: 1 }}>
+          <InfoIcon fontSize="large" /> Tenant Details
+        </DialogTitle>
+        <Divider sx={{ mb: 2 }} />
+        <DialogContent>
+          {viewTenant && (
+            <Grid container spacing={2}>
+              <Grid item xs={6}><Typography variant="subtitle2" color="text.secondary">Shop Number</Typography><Typography>{viewTenant.shop_number || '-'}</Typography></Grid>
+              <Grid item xs={6}><Typography variant="subtitle2" color="text.secondary">Shop Name</Typography><Typography>{viewTenant.name}</Typography></Grid>
+              <Grid item xs={6}><Typography variant="subtitle2" color="text.secondary">Owner Name</Typography><Typography>{viewTenant.owner_name}</Typography></Grid>
+              <Grid item xs={6}><Typography variant="subtitle2" color="text.secondary">Phone</Typography><Typography>{viewTenant.phone || '-'}</Typography></Grid>
+              <Grid item xs={12}><Typography variant="subtitle2" color="text.secondary">Address</Typography><Typography>{viewTenant.address || '-'}</Typography></Grid>
+              <Grid item xs={6}><Typography variant="subtitle2" color="text.secondary">Date Joined</Typography><Typography>{viewTenant.date_of_joining ? new Date(viewTenant.date_of_joining).toLocaleDateString() : '-'}</Typography></Grid>
+              <Grid item xs={6}><Typography variant="subtitle2" color="text.secondary">Status</Typography><Typography>{viewTenant.status}</Typography></Grid>
+              <Grid item xs={6}><Typography variant="subtitle2" color="text.secondary">Mart Approved</Typography><Typography>{viewTenant.mart_approved ? 'Yes' : 'No'}</Typography></Grid>
+              <Grid item xs={6}><Typography variant="subtitle2" color="text.secondary">Mart Name</Typography><Typography>{viewTenant.mart_name || '-'}</Typography></Grid>
+            </Grid>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenViewDialog(false)} variant="contained" sx={{ borderRadius: 2, px: 3 }}>Close</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
