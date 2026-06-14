@@ -510,7 +510,7 @@ async def liquor_analytics(
             LiquorProduct.brand_name,
             func.sum(OrderItem.quantity).label("total_quantity")
         )
-        .join(OrderItem, OrderItem.menu_item_id == LiquorProduct.id)
+        .join(OrderItem, OrderItem.product_id == LiquorProduct.id)
         .join(Order, OrderItem.order_id == Order.id)
         .where(
             Order.tenant_id == tenant_id,
