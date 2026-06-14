@@ -59,6 +59,7 @@ const LiquorPOS = () => {
   const [completeDialogOpen, setCompleteDialogOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [recalledOrderId, setRecalledOrderId] = useState(null);
   const searchInputRef = useRef(null);
 
   // Check if current cashier is assigned to mart
@@ -82,7 +83,6 @@ const LiquorPOS = () => {
     checkAssignment();
   }, [user]);
 
-
   useEffect(() => {
     setTimeout(() => searchInputRef.current?.focus(), 100);
   }, []);
@@ -92,11 +92,46 @@ const LiquorPOS = () => {
     setCartTotal(total);
   }, [cart]);
 
+  // Debounced brand search
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(() => {
+      if (searchQuery.trim().length >= 2) {
+        setLoading(true);
+        api.get(`/cashier/liquor/search-brand?q=${encodeURIComponent(searchQuery)}`)
+          .then(res => {
+            setSearchResults(res.data);
+          })
+          .catch(err => {
+            console.error('Failed to search brands', err);
+          })
+          .finally(() => {
+            setLoading(false);
+          });
+      } else {
+        setSearchResults([]);
+      }
+    }, 500);
 
+    return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
 
-
-
-
+  const handleBrandSelect = async (brand) => {
+    setSelectedBrand(brand);
+    setSearchQuery('');
+    setSearchResults([]);
+    setLoading(true);
+    try {
+      const location = assignedToMart ? 'mart' : 'shop';
+      const res = await api.get(`/cashier/liquor/sizes/${brand.brand_code}?location=${location}`);
+      setSizes(res.data);
+    } catch (err) {
+      console.error('Failed to fetch sizes', err);
+      setSnackbar({ open: true, message: 'Failed to fetch sizes', severity: 'error' });
+      setSizes([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const addToCart = (size) => {
     if (size.current_stock <= 0) {
@@ -153,18 +188,18 @@ const LiquorPOS = () => {
     try {
       const response = await api.post('/cashier/orders', {
         items: cart.map((item) => ({
-          menu_item_id: item.product_id,
+          product_id: item.product_id,
           quantity: item.quantity,
           unit_price: item.mrp,
-          cost_price: item.unit_cost,
         })),
-        payment_method: '',
+        payment_method: paymentMethod || 'cash',
         status: 'hold',
       });
       setCart([]);
       setSelectedBrand(null);
       setSizes([]);
       setSearchQuery('');
+      setRecalledOrderId(null);
       setSnackbar({ open: true, message: 'Order held', severity: 'success' });
       fetchHoldOrders();
     } catch (err) {
@@ -192,8 +227,8 @@ const LiquorPOS = () => {
       const response = await api.get(`/cashier/orders/${orderId}`);
       const order = response.data;
       const cartItems = order.items.map((item) => ({
-        product_id: item.menu_item_id,
-        brand_name: item.name,
+        product_id: item.product_id,
+        brand_name: item.brand_name,
         size_code: item.size_code || '',
         size_ml: item.size_ml || 0,
         pack_qty: item.pack_qty || 0,
@@ -202,6 +237,7 @@ const LiquorPOS = () => {
         quantity: item.quantity,
       }));
       setCart(cartItems);
+      setRecalledOrderId(orderId);
       setHoldDialogOpen(false);
       setSnackbar({ open: true, message: 'Order recalled', severity: 'success' });
     } catch (err) {
@@ -262,7 +298,13 @@ const LiquorPOS = () => {
     doc.text(`Payment: ${paymentMethod.toUpperCase()}`, 150, finalY + 7);
     doc.text('Thank you! Visit again.', 105, finalY + 20, { align: 'center' });
 
-    doc.save(`bill_${orderId.slice(0,8)}.pdf`);
+    const blob = doc.output('blob');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bill_${orderId.slice(0,8)}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const completeSale = async () => {
@@ -272,18 +314,33 @@ const LiquorPOS = () => {
     }
     setLoading(true);
     try {
-      const response = await api.post('/cashier/orders', {
-        items: cart.map((item) => ({
-          menu_item_id: item.product_id,
-          quantity: item.quantity,
-          unit_price: item.mrp,
-          cost_price: item.unit_cost,
-        })),
-        payment_method: paymentMethod,
-        status: 'completed',
-      });
-      const { order_id } = response.data;
-      generatePDF(order_id, cart, cartTotal, paymentMethod);
+      let response;
+      if (recalledOrderId) {
+        // Update existing held order to completed (stock already deducted)
+        response = await api.put(`/cashier/orders/${recalledOrderId}`, {
+          items: cart.map((item) => ({
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit_price: item.mrp,
+          })),
+          payment_method: paymentMethod,
+          status: 'completed',
+        });
+        setRecalledOrderId(null);
+      } else {
+        // Create new order (stock will be deducted)
+        response = await api.post('/cashier/orders', {
+          items: cart.map((item) => ({
+            product_id: item.product_id,
+            quantity: item.quantity,
+            unit_price: item.mrp,
+          })),
+          payment_method: paymentMethod,
+          status: 'completed',
+        });
+      }
+      const orderId = response.data.order_id;
+      generatePDF(orderId, cart, cartTotal, paymentMethod);
       setCart([]);
       setSelectedBrand(null);
       setSizes([]);
@@ -302,9 +359,18 @@ const LiquorPOS = () => {
   const clearCart = () => {
     if (cart.length > 0) {
       setCart([]);
+      setRecalledOrderId(null);
       setSnackbar({ open: true, message: 'Cart cleared', severity: 'info' });
     }
   };
+
+  if (assignmentsLoading) {
+    return <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}><CircularProgress /></Box>;
+  }
+
+  if (!assignedToMart) {
+    return <Alert severity="warning">You are not assigned to the mart. Cannot use POS.</Alert>;
+  }
 
   return (
     <Box sx={{ p: { xs: 1, md: 3 }, height: '100%' }}>
@@ -353,13 +419,13 @@ const LiquorPOS = () => {
                 <Grid container spacing={2}>
                   {sizes.map((size) => (
                     <Grid item xs={6} sm={4} key={size.product_id}>
-                      <Card 
-                        variant="outlined" 
-                        sx={{ 
+                      <Card
+                        variant="outlined"
+                        sx={{
                           cursor: size.current_stock > 0 ? 'pointer' : 'not-allowed',
                           opacity: size.current_stock > 0 ? 1 : 0.6,
                           '&:hover': size.current_stock > 0 ? { boxShadow: 3 } : {}
-                        }} 
+                        }}
                         onClick={() => addToCart(size)}
                       >
                         <CardContent sx={{ textAlign: 'center', p: 1.5 }}>
@@ -367,11 +433,11 @@ const LiquorPOS = () => {
                           <Typography variant="caption">{size.size_ml}ml</Typography>
                           <Typography variant="caption" display="block">Pack: {size.pack_qty} btls/case</Typography>
                           <Typography variant="body2" fontWeight={600}>₹{size.mrp}</Typography>
-                          <Chip 
-                            label={`Stock: ${size.current_stock}`} 
-                            size="small" 
-                            color={size.current_stock < 5 ? 'warning' : 'default'} 
-                            sx={{ mt: 0.5 }} 
+                          <Chip
+                            label={`Stock: ${size.current_stock}`}
+                            size="small"
+                            color={size.current_stock < 5 ? 'warning' : 'default'}
+                            sx={{ mt: 0.5 }}
                           />
                         </CardContent>
                       </Card>
@@ -461,7 +527,7 @@ const LiquorPOS = () => {
             <List>
               {holdOrders.map((order) => (
                 <ListItem key={order.id} sx={{ cursor: 'pointer' }} onClick={() => recallOrder(order.id)}>
-                  <ListItemText primary={`Order: ${order.id.slice(0,8)}`} secondary={`Items: ${order.items_count} | ₹${order.total_amount}`} />
+                  <ListItemText primary={`Order: ${order.id.slice(0, 8)}`} secondary={`Items: ${order.items_count} | ₹${order.total_amount}`} />
                 </ListItem>
               ))}
             </List>

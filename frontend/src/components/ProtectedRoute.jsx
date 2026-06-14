@@ -41,8 +41,11 @@ export default function ProtectedRoute({ children, allowedRole }) {
   }
 
   // Role check
-  if (allowedRole && user.role !== allowedRole) {
-    return <Navigate to="/login" />;
+  if (allowedRole) {
+    const effectiveRole = user.role === 'co_owner' ? 'owner' : user.role;
+    if (effectiveRole !== allowedRole && user.role !== allowedRole) {
+      return <Navigate to="/login" />;
+    }
   }
 
   return children;

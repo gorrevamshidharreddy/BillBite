@@ -16,6 +16,7 @@ import uuid
 import io
 import re
 import pdfplumber
+
 router = APIRouter(dependencies=[Depends(require_role(["cashier", "owner"]))])
 
 # ---------------------------
@@ -301,7 +302,7 @@ async def update_order(
     for item_data in data.items:
         new_item = OrderItem(
             order_id=order.id,
-            menu_item_id=item_data.product_id,
+            product_id=item_data.product_id,
             quantity=item_data.quantity,
             unit_price=item_data.unit_price,
         )
@@ -478,15 +479,22 @@ async def daily_stock(
                        func.date(StockTransfer.transfer_date) == dt)
             )).scalar() or 0
             
-            sale_bottles = transfers_out
-            sale_amount = 0.0
-            calculated_closing = opening + total_rec - transfers_out
+            # Total after transfer (this is the "Total" column)
+            total_before_closing = opening + total_rec - transfers_out
             
-            # Use saved closing if exists, else calculated
+            # Use saved closing if exists, else use total_before_closing as calculated closing
             if prod.id in saved_recs:
                 closing = saved_recs[prod.id].closing_stock_physical
             else:
-                closing = calculated_closing
+                closing = total_before_closing
+            
+            # Sale = Total - Closing
+            sale_bottles = total_before_closing - closing
+            if sale_bottles < 0:
+                sale_bottles = 0
+            
+            # Sale amount = Sale × MRP
+            sale_amount = sale_bottles * prod.mrp
             
             response.append({
                 "product_id": prod.id,
@@ -499,28 +507,88 @@ async def daily_stock(
                 "receipts_loose": loose_rec,
                 "total_receipts": total_rec,
                 "transfers_out": transfers_out,
+                "total_before_closing": total_before_closing,   # NEW: Total column
                 "sale_bottles": sale_bottles,
                 "closing_stock": closing,
                 "mrp": prod.mrp,
                 "sale_amount": sale_amount,
             })
         else:
-            # Mart location (simplified – you can extend similarly if needed)
+            # Mart location – keep as before
+            # For mart, you might want a similar calculation later, but for now return simple stock
+            prev_day = dt - timedelta(days=1)
+            prev_stmt = select(DailyStockReconciliation).where(
+                DailyStockReconciliation.tenant_id == tenant_id,
+                func.date(DailyStockReconciliation.reconciliation_date) == prev_day,
+                DailyStockReconciliation.location == "mart",
+                DailyStockReconciliation.product_id == prod.id
+            )
+            prev_result = await db.execute(prev_stmt)
+            prev_rec = prev_result.scalar_one_or_none()
+            opening = prev_rec.closing_stock_physical if prev_rec else 0
+
+            # 2. Receipts on the day (stock transactions directly into mart – e.g., via invoice upload)
+            rec_data = await db.execute(
+                select(func.coalesce(func.sum(StockTransaction.cases_received), 0),
+                       func.coalesce(func.sum(StockTransaction.loose_received), 0),
+                       func.coalesce(func.sum(StockTransaction.total_bottles_added), 0))
+                .where(StockTransaction.product_id == prod.id, StockTransaction.tenant_id == tenant_id,
+                       StockTransaction.location == "mart", func.date(StockTransaction.date) == dt)
+            )
+            cases_rec, loose_rec, total_rec = rec_data.one()
+
+            # 3. Transfers in from shop on the day
+            transfers_in = (await db.execute(
+                select(func.coalesce(func.sum(StockTransfer.total_bottles), 0))
+                .where(StockTransfer.to_product_id == prod.id, StockTransfer.tenant_id == tenant_id,
+                       func.date(StockTransfer.transfer_date) == dt)
+            )).scalar() or 0
+
+            # 4. Sales on the day (from POS orders)
+            sales_day = (await db.execute(
+                select(func.coalesce(func.sum(OrderItem.quantity), 0))
+                .join(Order, Order.id == OrderItem.order_id)
+                .where(Order.tenant_id == tenant_id, Order.status == "completed",
+                       func.date(Order.created_at) == dt, OrderItem.product_id == prod.id)
+            )).scalar() or 0
+
+            sale_amount = (await db.execute(
+                select(func.coalesce(func.sum(OrderItem.unit_price * OrderItem.quantity), 0))
+                .join(Order, Order.id == OrderItem.order_id)
+                .where(Order.tenant_id == tenant_id, Order.status == "completed",
+                       func.date(Order.created_at) == dt, OrderItem.product_id == prod.id)
+            )).scalar() or 0.0
+
+            # 5. Calculated closing (if no saved physical closing)
+            calculated_closing = opening + total_rec + transfers_in - sales_day
+
+            # Use saved closing if exists, else calculated
+            if prod.id in saved_recs:
+                closing = saved_recs[prod.id].closing_stock_physical
+            else:
+                closing = calculated_closing
+
+            # 6. Sold bottles = sales_day (actual sales)
+            sale_bottles = sales_day
+            # 7. Total before closing (for information) – same as calculated_closing
+            total_before_closing = calculated_closing
+
             response.append({
                 "product_id": prod.id,
                 "brand_code": prod.brand_code,
                 "brand_name": prod.brand_name,
                 "size_ml": prod.size_ml,
                 "pack_qty": prod.pack_qty,
-                "opening_stock": 0,
-                "receipts_cases": 0,
-                "receipts_loose": 0,
-                "total_receipts": 0,
-                "transfers_in": 0,
-                "sale_bottles": 0,
-                "closing_stock": ts.current_stock,
+                "opening_stock": opening,
+                "receipts_cases": cases_rec,
+                "receipts_loose": loose_rec,
+                "total_receipts": total_rec,
+                "transfers_in": transfers_in,
+                "total_before_closing": total_before_closing,
+                "sale_bottles": sale_bottles,
+                "closing_stock": closing,
                 "mrp": prod.mrp,
-                "sale_amount": 0,
+                "sale_amount": sale_amount,
             })
     
     return response
