@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 from database import get_db
 from auth import require_role, get_current_user
 from schema_manager import (
-    Tenant, MenuItem, Order, OrderItem, 
+    Tenant, Order, OrderItem, 
     LiquorProduct, LiquorTenantStock, PurchaseInvoice, PurchaseItem, StockTransaction,
     CashierAssignment, StockTransfer, DailyStockReconciliation, User, CashierExpense
 )
@@ -16,6 +16,7 @@ import uuid
 import io
 import re
 import pdfplumber
+
 router = APIRouter(dependencies=[Depends(require_role(["cashier", "owner"]))])
 
 # ---------------------------
@@ -48,7 +49,7 @@ async def require_mart_assignment(current_user: dict, db: AsyncSession):
 # Pydantic Schemas
 # ---------------------------
 class OrderItemSchema(BaseModel):
-    menu_item_id: str
+    product_id: str
     quantity: int
     unit_price: float
 
@@ -128,31 +129,6 @@ async def get_tenant_info(
         "phone": tenant.phone,
     }
 
-@router.get("/menu")
-async def get_menu(
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    await require_shop_assignment(current_user, db)
-    tenant_id = current_user["tenant_id"]
-    result = await db.execute(
-        select(MenuItem).where(
-            MenuItem.tenant_id == tenant_id,
-            MenuItem.is_available == True
-        )
-    )
-    items = result.scalars().all()
-    return [
-        {
-            "id": item.id,
-            "name": item.name,
-            "price": item.price,
-            "item_type": item.item_type,
-            "category_id": item.category_id,
-        }
-        for item in items
-    ]
-
 @router.post("/orders")
 async def create_order(
     data: CreateOrder,
@@ -161,86 +137,56 @@ async def create_order(
 ):
     tenant_id = current_user["tenant_id"]
     cashier_id = current_user["user_id"]
-    business_type = current_user.get("business_type")
-
-    if business_type == "restaurant":
-        await require_shop_assignment(current_user, db)
-        total = sum(item.unit_price * item.quantity for item in data.items)
-        order = Order(
-            tenant_id=tenant_id,
-            cashier_id=cashier_id,
-            total_amount=total,
-            payment_method=data.payment_method if data.status == "completed" else "",
-            status=data.status,
-        )
-        db.add(order)
-        await db.flush()
-        for item_data in data.items:
-            order_item = OrderItem(
-                order_id=order.id,
-                menu_item_id=item_data.menu_item_id,
-                quantity=item_data.quantity,
-                unit_price=item_data.unit_price,
-            )
-            db.add(order_item)
-        await db.commit()
-        return {
-            "order_id": order.id,
-            "total": total,
-            "status": order.status,
-            "token_number": order.id[:8],
-        }
     
-    else:  # liquor mart
-        await require_mart_assignment(current_user, db)
-        total = 0.0
-        order = Order(
-            tenant_id=tenant_id,
-            cashier_id=cashier_id,
-            total_amount=0,
-            payment_method=data.payment_method if data.status == "completed" else "",
-            status=data.status,
-        )
-        db.add(order)
-        await db.flush()
+    await require_mart_assignment(current_user, db)
+    total = 0.0
+    order = Order(
+        tenant_id=tenant_id,
+        cashier_id=cashier_id,
+        total_amount=0,
+        payment_method=data.payment_method if data.status == "completed" else "",
+        status=data.status,
+    )
+    db.add(order)
+    await db.flush()
 
-        for item_data in data.items:
-            product = await db.get(LiquorProduct, item_data.menu_item_id)
-            if not product:
-                raise HTTPException(status_code=400, detail=f"Product not found")
-            
-            stock_stmt = select(LiquorTenantStock).where(
-                LiquorTenantStock.tenant_id == tenant_id,
-                LiquorTenantStock.product_id == product.id,
-                LiquorTenantStock.location == "mart"
-            )
-            tenant_stock = await db.execute(stock_stmt)
-            tenant_stock = tenant_stock.scalar_one_or_none()
-            
-            if not tenant_stock or tenant_stock.current_stock < item_data.quantity:
-                raise HTTPException(status_code=400, detail=f"Insufficient stock in mart for {product.brand_name}")
-            
-            tenant_stock.current_stock -= item_data.quantity
-            
-            line_total = item_data.unit_price * item_data.quantity
-            total += line_total
-            order_item = OrderItem(
-                order_id=order.id,
-                menu_item_id=item_data.menu_item_id,
-                quantity=item_data.quantity,
-                unit_price=item_data.unit_price,
-                cost_price=product.unit_cost
-            )
-            db.add(order_item)
+    for item_data in data.items:
+        product = await db.get(LiquorProduct, item_data.product_id)
+        if not product:
+            raise HTTPException(status_code=400, detail=f"Product not found")
         
-        order.total_amount = total
-        await db.commit()
-        return {
-            "order_id": order.id,
-            "total": total,
-            "status": order.status,
-            "token_number": order.id[:8],
-        }
+        stock_stmt = select(LiquorTenantStock).where(
+            LiquorTenantStock.tenant_id == tenant_id,
+            LiquorTenantStock.product_id == product.id,
+            LiquorTenantStock.location == "mart"
+        )
+        tenant_stock = await db.execute(stock_stmt)
+        tenant_stock = tenant_stock.scalar_one_or_none()
+        
+        if not tenant_stock or tenant_stock.current_stock < item_data.quantity:
+            raise HTTPException(status_code=400, detail=f"Insufficient stock in mart for {product.brand_name}")
+        
+        tenant_stock.current_stock -= item_data.quantity
+        
+        line_total = item_data.unit_price * item_data.quantity
+        total += line_total
+        order_item = OrderItem(
+            order_id=order.id,
+            product_id=item_data.product_id,
+            quantity=item_data.quantity,
+            unit_price=item_data.unit_price,
+            cost_price=product.unit_cost
+        )
+        db.add(order_item)
+    
+    order.total_amount = total
+    await db.commit()
+    return {
+        "order_id": order.id,
+        "total": total,
+        "status": order.status,
+        "token_number": order.id[:8],
+    }
 
 @router.get("/orders/hold")
 async def get_hold_orders(
@@ -304,41 +250,23 @@ async def get_order(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    tenant = await db.get(Tenant, tenant_id)
-    is_liquor = tenant and tenant.business_type == "liquor_mart"
-    
-    if is_liquor:
-        items_result = await db.execute(
-            select(OrderItem, LiquorProduct.brand_name, LiquorProduct.size_code, LiquorProduct.size_ml, LiquorProduct.pack_qty)
-            .join(LiquorProduct, OrderItem.menu_item_id == LiquorProduct.id)
-            .where(OrderItem.order_id == order.id)
-        )
-        items = []
-        for oi, brand_name, size_code, size_ml, pack_qty in items_result:
-            items.append({
-                "menu_item_id": oi.menu_item_id,
-                "name": brand_name,
-                "size_code": size_code,
-                "size_ml": size_ml,
-                "pack_qty": pack_qty,
-                "quantity": oi.quantity,
-                "unit_price": oi.unit_price,
-                "cost_price": oi.cost_price,
-            })
-    else:
-        items_result = await db.execute(
-            select(OrderItem, MenuItem.name)
-            .join(MenuItem, OrderItem.menu_item_id == MenuItem.id)
-            .where(OrderItem.order_id == order.id)
-        )
-        items = []
-        for oi, name in items_result:
-            items.append({
-                "menu_item_id": oi.menu_item_id,
-                "name": name,
-                "quantity": oi.quantity,
-                "unit_price": oi.unit_price,
-            })
+    items_result = await db.execute(
+        select(OrderItem, LiquorProduct.brand_name, LiquorProduct.size_code, LiquorProduct.size_ml, LiquorProduct.pack_qty)
+        .join(LiquorProduct, OrderItem.product_id == LiquorProduct.id)
+        .where(OrderItem.order_id == order.id)
+    )
+    items = []
+    for oi, brand_name, size_code, size_ml, pack_qty in items_result:
+        items.append({
+            "product_id": oi.product_id,
+            "name": brand_name,
+            "size_code": size_code,
+            "size_ml": size_ml,
+            "pack_qty": pack_qty,
+            "quantity": oi.quantity,
+            "unit_price": oi.unit_price,
+            "cost_price": oi.cost_price,
+        })
     
     return {
         "id": order.id,
@@ -374,7 +302,7 @@ async def update_order(
     for item_data in data.items:
         new_item = OrderItem(
             order_id=order.id,
-            menu_item_id=item_data.menu_item_id,
+            product_id=item_data.product_id,
             quantity=item_data.quantity,
             unit_price=item_data.unit_price,
         )
@@ -551,15 +479,22 @@ async def daily_stock(
                        func.date(StockTransfer.transfer_date) == dt)
             )).scalar() or 0
             
-            sale_bottles = transfers_out
-            sale_amount = 0.0
-            calculated_closing = opening + total_rec - transfers_out
+            # Total after transfer (this is the "Total" column)
+            total_before_closing = opening + total_rec - transfers_out
             
-            # Use saved closing if exists, else calculated
+            # Use saved closing if exists, else use total_before_closing as calculated closing
             if prod.id in saved_recs:
                 closing = saved_recs[prod.id].closing_stock_physical
             else:
-                closing = calculated_closing
+                closing = total_before_closing
+            
+            # Sale = Total - Closing
+            sale_bottles = total_before_closing - closing
+            if sale_bottles < 0:
+                sale_bottles = 0
+            
+            # Sale amount = Sale × MRP
+            sale_amount = sale_bottles * prod.mrp
             
             response.append({
                 "product_id": prod.id,
@@ -572,28 +507,88 @@ async def daily_stock(
                 "receipts_loose": loose_rec,
                 "total_receipts": total_rec,
                 "transfers_out": transfers_out,
+                "total_before_closing": total_before_closing,   # NEW: Total column
                 "sale_bottles": sale_bottles,
                 "closing_stock": closing,
                 "mrp": prod.mrp,
                 "sale_amount": sale_amount,
             })
         else:
-            # Mart location (simplified – you can extend similarly if needed)
+            # Mart location – keep as before
+            # For mart, you might want a similar calculation later, but for now return simple stock
+            prev_day = dt - timedelta(days=1)
+            prev_stmt = select(DailyStockReconciliation).where(
+                DailyStockReconciliation.tenant_id == tenant_id,
+                func.date(DailyStockReconciliation.reconciliation_date) == prev_day,
+                DailyStockReconciliation.location == "mart",
+                DailyStockReconciliation.product_id == prod.id
+            )
+            prev_result = await db.execute(prev_stmt)
+            prev_rec = prev_result.scalar_one_or_none()
+            opening = prev_rec.closing_stock_physical if prev_rec else 0
+
+            # 2. Receipts on the day (stock transactions directly into mart – e.g., via invoice upload)
+            rec_data = await db.execute(
+                select(func.coalesce(func.sum(StockTransaction.cases_received), 0),
+                       func.coalesce(func.sum(StockTransaction.loose_received), 0),
+                       func.coalesce(func.sum(StockTransaction.total_bottles_added), 0))
+                .where(StockTransaction.product_id == prod.id, StockTransaction.tenant_id == tenant_id,
+                       StockTransaction.location == "mart", func.date(StockTransaction.date) == dt)
+            )
+            cases_rec, loose_rec, total_rec = rec_data.one()
+
+            # 3. Transfers in from shop on the day
+            transfers_in = (await db.execute(
+                select(func.coalesce(func.sum(StockTransfer.total_bottles), 0))
+                .where(StockTransfer.to_product_id == prod.id, StockTransfer.tenant_id == tenant_id,
+                       func.date(StockTransfer.transfer_date) == dt)
+            )).scalar() or 0
+
+            # 4. Sales on the day (from POS orders)
+            sales_day = (await db.execute(
+                select(func.coalesce(func.sum(OrderItem.quantity), 0))
+                .join(Order, Order.id == OrderItem.order_id)
+                .where(Order.tenant_id == tenant_id, Order.status == "completed",
+                       func.date(Order.created_at) == dt, OrderItem.product_id == prod.id)
+            )).scalar() or 0
+
+            sale_amount = (await db.execute(
+                select(func.coalesce(func.sum(OrderItem.unit_price * OrderItem.quantity), 0))
+                .join(Order, Order.id == OrderItem.order_id)
+                .where(Order.tenant_id == tenant_id, Order.status == "completed",
+                       func.date(Order.created_at) == dt, OrderItem.product_id == prod.id)
+            )).scalar() or 0.0
+
+            # 5. Calculated closing (if no saved physical closing)
+            calculated_closing = opening + total_rec + transfers_in - sales_day
+
+            # Use saved closing if exists, else calculated
+            if prod.id in saved_recs:
+                closing = saved_recs[prod.id].closing_stock_physical
+            else:
+                closing = calculated_closing
+
+            # 6. Sold bottles = sales_day (actual sales)
+            sale_bottles = sales_day
+            # 7. Total before closing (for information) – same as calculated_closing
+            total_before_closing = calculated_closing
+
             response.append({
                 "product_id": prod.id,
                 "brand_code": prod.brand_code,
                 "brand_name": prod.brand_name,
                 "size_ml": prod.size_ml,
                 "pack_qty": prod.pack_qty,
-                "opening_stock": 0,
-                "receipts_cases": 0,
-                "receipts_loose": 0,
-                "total_receipts": 0,
-                "transfers_in": 0,
-                "sale_bottles": 0,
-                "closing_stock": ts.current_stock,
+                "opening_stock": opening,
+                "receipts_cases": cases_rec,
+                "receipts_loose": loose_rec,
+                "total_receipts": total_rec,
+                "transfers_in": transfers_in,
+                "total_before_closing": total_before_closing,
+                "sale_bottles": sale_bottles,
+                "closing_stock": closing,
                 "mrp": prod.mrp,
-                "sale_amount": 0,
+                "sale_amount": sale_amount,
             })
     
     return response

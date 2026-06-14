@@ -20,30 +20,6 @@ router = APIRouter()
 # ---------------------------
 # Pydantic Schemas
 # ---------------------------
-class MenuItemCreate(BaseModel):
-    name: str
-    price: float
-    item_type: str   # 'packaged' or 'prepared'
-    category_id: Optional[str] = None
-
-class MenuItemUpdate(BaseModel):
-    name: Optional[str] = None
-    price: Optional[float] = None
-    item_type: Optional[str] = None
-    category_id: Optional[str] = None
-    is_available: Optional[bool] = None
-
-class CategoryCreate(BaseModel):
-    name: str
-
-class StockAdd(BaseModel):
-    menu_item_id: str
-    quantity: int
-
-class StockAdjust(BaseModel):
-    menu_item_id: str
-    quantity_change: int
-
 class RawExpenseCreate(BaseModel):
     item_name: str
     quantity: Optional[float] = None
@@ -100,176 +76,6 @@ class CashierAssignmentUpdate(BaseModel):
 class MartRequestCreate(BaseModel):
     mart_name: str
     mart_address: str
-
-# ---------------------------
-# Menu Endpoints (unchanged)
-# ---------------------------
-@router.get("/menu")
-async def get_menu(current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    result = await db.execute(
-        select(MenuItem).where(MenuItem.tenant_id == tenant_id)
-    )
-    items = result.scalars().all()
-    return [
-        {
-            "id": item.id,
-            "name": item.name,
-            "price": item.price,
-            "item_type": item.item_type,
-            "category_id": item.category_id,
-            "is_available": item.is_available,
-        }
-        for item in items
-    ]
-
-@router.post("/menu/items")
-async def create_menu_item(data: MenuItemCreate, current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    item = MenuItem(
-        tenant_id=tenant_id,
-        name=data.name,
-        price=data.price,
-        item_type=data.item_type,
-        category_id=data.category_id,
-    )
-    db.add(item)
-    await db.commit()
-    return {"id": item.id, "name": item.name}
-
-@router.put("/menu/items/{item_id}")
-async def update_menu_item(item_id: str, data: MenuItemUpdate, current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    result = await db.execute(
-        select(MenuItem).where(
-            MenuItem.id == item_id,
-            MenuItem.tenant_id == tenant_id
-        )
-    )
-    item = result.scalar_one_or_none()
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-    update_data = data.dict(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(item, key, value)
-    await db.commit()
-    return {"message": "Item updated"}
-
-@router.delete("/menu/items/{item_id}")
-async def delete_menu_item(item_id: str, current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    result = await db.execute(
-        select(MenuItem).where(
-            MenuItem.id == item_id,
-            MenuItem.tenant_id == tenant_id
-        )
-    )
-    item = result.scalar_one_or_none()
-    if not item:
-        raise HTTPException(status_code=404, detail="Item not found")
-    await db.delete(item)
-    await db.commit()
-    return {"message": "Item deleted"}
-
-@router.get("/menu/categories")
-async def get_categories(current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    result = await db.execute(select(Category).where(Category.tenant_id == tenant_id))
-    categories = result.scalars().all()
-    return [{"id": c.id, "name": c.name} for c in categories]
-
-@router.post("/menu/categories")
-async def create_category(data: CategoryCreate, current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    category = Category(name=data.name, tenant_id=tenant_id)
-    db.add(category)
-    await db.commit()
-    return {"id": category.id, "name": category.name}
-
-# ---------------------------
-# Packaged Stock Endpoints (unchanged)
-# ---------------------------
-@router.get("/stock")
-async def get_stock(current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    result = await db.execute(
-        select(PackagedStock, MenuItem.name)
-        .join(MenuItem, PackagedStock.menu_item_id == MenuItem.id)
-        .where(PackagedStock.tenant_id == tenant_id)
-    )
-    rows = result.all()
-    return [
-        {
-            "stock_id": row.PackagedStock.id,
-            "menu_item_id": row.PackagedStock.menu_item_id,
-            "item_name": row.name,
-            "quantity_in_stock": row.PackagedStock.quantity_in_stock,
-            "low_stock_threshold": row.PackagedStock.low_stock_threshold,
-        }
-        for row in rows
-    ]
-
-@router.post("/stock/add")
-async def add_stock(data: StockAdd, current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    result = await db.execute(
-        select(PackagedStock).where(
-            PackagedStock.menu_item_id == data.menu_item_id,
-            PackagedStock.tenant_id == tenant_id
-        )
-    )
-    stock = result.scalar_one_or_none()
-    if not stock:
-        menu_result = await db.execute(
-            select(MenuItem).where(
-                MenuItem.id == data.menu_item_id,
-                MenuItem.tenant_id == tenant_id,
-                MenuItem.item_type == "packaged"
-            )
-        )
-        menu_item = menu_result.scalar_one_or_none()
-        if not menu_item:
-            raise HTTPException(status_code=400, detail="Item not found or not a packaged item")
-        stock = PackagedStock(
-            tenant_id=tenant_id,
-            menu_item_id=data.menu_item_id,
-            quantity_in_stock=0
-        )
-        db.add(stock)
-        await db.flush()
-    stock.quantity_in_stock += data.quantity
-    movement = StockMovement(
-        tenant_id=tenant_id,
-        packaged_stock_id=stock.id,
-        movement_type="purchase",
-        quantity_change=data.quantity,
-    )
-    db.add(movement)
-    await db.commit()
-    return {"message": "Stock updated", "current_quantity": stock.quantity_in_stock}
-
-@router.post("/stock/adjust")
-async def adjust_stock(data: StockAdjust, current_owner: dict = Depends(get_current_owner), db: AsyncSession = Depends(get_db)):
-    tenant_id = current_owner["tenant_id"]
-    result = await db.execute(
-        select(PackagedStock).where(
-            PackagedStock.menu_item_id == data.menu_item_id,
-            PackagedStock.tenant_id == tenant_id
-        )
-    )
-    stock = result.scalar_one_or_none()
-    if not stock:
-        raise HTTPException(status_code=404, detail="Stock entry not found")
-    stock.quantity_in_stock += data.quantity_change
-    movement = StockMovement(
-        tenant_id=tenant_id,
-        packaged_stock_id=stock.id,
-        movement_type="adjustment",
-        quantity_change=data.quantity_change,
-    )
-    db.add(movement)
-    await db.commit()
-    return {"message": "Stock adjusted", "current_quantity": stock.quantity_in_stock}
 
 # ---------------------------
 # Expense Endpoints (Raw Materials + Other) (unchanged)
@@ -541,42 +347,6 @@ async def profit_report(
         "profit": profit,
     }
 
-@router.get("/reports/item-sales")
-async def item_sales_report(
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    current_owner: dict = Depends(get_current_owner),
-    db: AsyncSession = Depends(get_db)
-):
-    tenant_id = current_owner["tenant_id"]
-    query = (
-        select(
-            MenuItem.name,
-            func.sum(OrderItem.quantity).label("total_quantity"),
-            func.sum(OrderItem.unit_price * OrderItem.quantity).label("total_revenue")
-        )
-        .join(MenuItem, OrderItem.menu_item_id == MenuItem.id)
-        .join(Order, OrderItem.order_id == Order.id)
-        .where(Order.tenant_id == tenant_id, Order.status == "completed")
-        .group_by(MenuItem.name)
-        .order_by(func.sum(OrderItem.unit_price * OrderItem.quantity).desc())
-    )
-    if start_date:
-        query = query.where(Order.created_at >= datetime.fromisoformat(start_date))
-    if end_date:
-        query = query.where(Order.created_at <= datetime.fromisoformat(end_date))
-
-    result = await db.execute(query)
-    rows = result.all()
-    return [
-        {
-            "item_name": row.name,
-            "quantity_sold": int(row.total_quantity),
-            "revenue": float(row.total_revenue),
-        }
-        for row in rows
-    ]
-
 # ======================== LIQUOR MART OWNER ENDPOINTS (UPDATED FOR LOCATION) ========================
 
 @router.get("/liquor/stock-verification")
@@ -740,7 +510,7 @@ async def liquor_analytics(
             LiquorProduct.brand_name,
             func.sum(OrderItem.quantity).label("total_quantity")
         )
-        .join(OrderItem, OrderItem.menu_item_id == LiquorProduct.id)
+        .join(OrderItem, OrderItem.product_id == LiquorProduct.id)
         .join(Order, OrderItem.order_id == Order.id)
         .where(
             Order.tenant_id == tenant_id,

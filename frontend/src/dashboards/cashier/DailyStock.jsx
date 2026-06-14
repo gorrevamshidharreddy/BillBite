@@ -4,11 +4,14 @@ import {
   IconButton, Tooltip, Alert, CircularProgress, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, TableSortLabel, TablePagination,
   InputAdornment, Dialog, DialogTitle, DialogContent, DialogActions,
-  Snackbar, FormControl, InputLabel, Select, MenuItem,
+  Snackbar, FormControl, InputLabel, Select, MenuItem, Chip,
+  useTheme, alpha,
 } from '@mui/material';
 import {
   Refresh as RefreshIcon, Download as DownloadIcon, Search as SearchIcon,
   Clear as ClearIcon, Edit as EditIcon, Save as SaveIcon,
+  TrendingUp as TrendingUpIcon, Inventory as InventoryIcon,
+  LocalShipping as TransferIcon, Paid as PaidIcon,
 } from '@mui/icons-material';
 import { LocalizationProvider, DatePicker } from '@mui/x-date-pickers';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -17,6 +20,7 @@ import { useTenant } from '../../context/TenantContext';
 
 const DailyStock = ({ isOwnerView = false }) => {
   const { currentTenant } = useTenant();
+  const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -92,7 +96,7 @@ const DailyStock = ({ isOwnerView = false }) => {
           savedUpi = recRes.data.upi_total || 0;
           savedCard = recRes.data.card_total || 0;
         }
-      } catch (err) {}
+      } catch (err) { }
 
       const editable = checkEditable(selectedDate);
       if (editable) {
@@ -102,7 +106,7 @@ const DailyStock = ({ isOwnerView = false }) => {
             ...item,
             receipts_cases: saved?.receipts_cases ?? item.receipts_cases,
             receipts_loose: saved?.receipts_loose ?? item.receipts_loose,
-            closing_stock_physical: saved?.closing_stock_physical ?? item.closing_stock,
+            closing_stock_physical: saved?.closing_stock_physical ?? (item.closing_stock || 0),
           };
         });
         setEditableData(merged);
@@ -215,15 +219,15 @@ const DailyStock = ({ isOwnerView = false }) => {
   const exportToCSV = () => {
     const headers = [
       'Brand Code', 'Brand Name', 'Size (ml)', 'Opening',
-      'Cases Rec', 'Loose Rec', 'Total Rec',
+      'Cases Rec', 'Loose Rec',
       location === 'shop' ? 'Transfers Out' : 'Transfers In',
-      'Closing', 'Sold', 'MRP', 'Sale Amt'
+      'Total', 'Closing', 'Sold', 'MRP (₹)', 'Sale Amt (₹)'
     ];
     const rows = filteredData.map(item => [
       item.brand_code, item.brand_name, item.size_ml, item.opening_stock,
       item.receipts_cases, item.receipts_loose,
-      (item.receipts_cases * (item.pack_qty || 1) + item.receipts_loose),
       location === 'shop' ? (item.transfers_out || 0) : (item.transfers_in || 0),
+      item.total_before_closing !== undefined ? item.total_before_closing : (item.opening_stock + (item.receipts_cases * (item.pack_qty || 1) + item.receipts_loose) - (location === 'shop' ? (item.transfers_out || 0) : (item.transfers_in || 0))),
       editMode ? item.closing_stock_physical : item.closing_stock,
       item.sale_bottles || 0,
       item.mrp, item.sale_amount || 0,
@@ -244,23 +248,22 @@ const DailyStock = ({ isOwnerView = false }) => {
 
   return (
     <LocalizationProvider dateAdapter={AdapterDateFns}>
-      <Box sx={{ p: { xs: 1, md: 3 } }}>
-        <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
+      <Box sx={{ p: { xs: 2, md: 3 }, backgroundColor: theme.palette.background.default, minHeight: '100vh' }}>
+        {/* Header Card */}
+        <Paper elevation={2} sx={{ p: 3, mb: 3, borderRadius: 3, background: `linear-gradient(135deg, ${alpha(theme.palette.primary.main, 0.08)} 0%, ${alpha(theme.palette.primary.main, 0.02)} 100%)` }}>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 2 }}>
-            <Typography variant="h5" fontWeight={600}>
-              Daily Stock ({location === 'shop' ? 'Shop' : 'Mart'}) {editMode ? '(Editing)' : '(View)'}
+            <Typography variant="h5" fontWeight={700} sx={{ color: theme.palette.text.primary }}>
+              📊 Daily Stock {location === 'shop' ? '🏪 Shop' : '🏬 Mart'}
+              {editMode && <Chip label="Editing Mode" color="warning" size="small" sx={{ ml: 2 }} />}
             </Typography>
-            <Box sx={{ display: 'flex', gap: 1 }}>
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', alignItems: 'center' }}>
               {isOwnerView && currentTenant?.has_mart && (
-                <FormControl size="small" sx={{ minWidth: 120 }}>
+                <FormControl size="small" sx={{ minWidth: 130, bgcolor: 'background.paper', borderRadius: 2 }}>
                   <InputLabel>Location</InputLabel>
                   <Select
                     value={location}
                     label="Location"
-                    onChange={(e) => {
-                       setLocation(e.target.value);
-                       setEditMode(false);
-                    }}
+                    onChange={(e) => { setLocation(e.target.value); setEditMode(false); }}
                   >
                     <MenuItem value="shop">Shop</MenuItem>
                     <MenuItem value="mart">Mart</MenuItem>
@@ -271,109 +274,215 @@ const DailyStock = ({ isOwnerView = false }) => {
                 label="Select Date"
                 value={selectedDate}
                 onChange={(newValue) => { setSelectedDate(newValue); setEditMode(false); }}
-                renderInput={(params) => <TextField {...params} size="small" sx={{ minWidth: 150 }} />}
+                renderInput={(params) => <TextField {...params} size="small" sx={{ bgcolor: 'background.paper', borderRadius: 1, minWidth: 160 }} />}
               />
               {checkEditable(selectedDate) && !editMode && (
-                <Button variant="outlined" startIcon={<EditIcon />} onClick={() => setEditMode(true)}>Edit Today's Sheet</Button>
+                <Button variant="contained" startIcon={<EditIcon />} onClick={() => setEditMode(true)} sx={{ borderRadius: 2, textTransform: 'none' }}>
+                  Edit Today's Sheet
+                </Button>
               )}
               {editMode && (
                 <>
-                  <Button variant="contained" startIcon={<SaveIcon />} onClick={() => setSaveDialogOpen(true)} disabled={saving}>Save</Button>
-                  <Button variant="outlined" onClick={() => { setEditMode(false); fetchData(); }}>Cancel</Button>
+                  <Button variant="contained" color="primary" startIcon={<SaveIcon />} onClick={() => setSaveDialogOpen(true)} disabled={saving} sx={{ borderRadius: 2, textTransform: 'none' }}>
+                    Save
+                  </Button>
+                  <Button variant="outlined" onClick={() => { setEditMode(false); fetchData(); }} sx={{ borderRadius: 2, textTransform: 'none' }}>
+                    Cancel
+                  </Button>
                 </>
               )}
-              <Tooltip title="Refresh"><IconButton onClick={fetchData} disabled={loading}><RefreshIcon /></IconButton></Tooltip>
-              <Tooltip title="Export CSV"><IconButton onClick={exportToCSV} disabled={!filteredData.length}><DownloadIcon /></IconButton></Tooltip>
+              <Tooltip title="Refresh">
+                <IconButton onClick={fetchData} disabled={loading} sx={{ bgcolor: 'background.paper' }}>
+                  <RefreshIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Export CSV">
+                <IconButton onClick={exportToCSV} disabled={!filteredData.length} sx={{ bgcolor: 'background.paper' }}>
+                  <DownloadIcon />
+                </IconButton>
+              </Tooltip>
             </Box>
           </Box>
           {checkEditable(selectedDate) && !editMode && (
-            <Alert severity="info" sx={{ mt: 1 }}>You can edit today's sheet until tomorrow 12:00 PM.</Alert>
+            <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }} icon={<EditIcon />}>
+              You can edit today's stock sheet until tomorrow 12:00 PM.
+            </Alert>
           )}
         </Paper>
 
+        {/* Summary Cards */}
         <Grid container spacing={2} sx={{ mb: 3 }}>
-          <Grid item xs={6} sm={4} md={2}><Card sx={{ bgcolor: '#e3f2fd' }}><CardContent sx={{ textAlign: 'center' }}><Typography variant="caption">Opening</Typography><Typography variant="h6">{summary.totalOpening.toLocaleString()}</Typography></CardContent></Card></Grid>
-          <Grid item xs={6} sm={4} md={2}><Card sx={{ bgcolor: '#e8f5e9' }}><CardContent sx={{ textAlign: 'center' }}><Typography variant="caption">Receipts</Typography><Typography variant="h6" color="success.main">{summary.totalReceipts.toLocaleString()}</Typography></CardContent></Card></Grid>
-          <Grid item xs={6} sm={4} md={2}><Card sx={{ bgcolor: '#fff3e0' }}><CardContent sx={{ textAlign: 'center' }}><Typography variant="caption">{location === 'shop' ? 'Transfers Out' : 'Transfers In'}</Typography><Typography variant="h6">{summary.totalTransfers.toLocaleString()}</Typography></CardContent></Card></Grid>
-          <Grid item xs={6} sm={4} md={2}><Card sx={{ bgcolor: '#ffebee' }}><CardContent sx={{ textAlign: 'center' }}><Typography variant="caption">Sold</Typography><Typography variant="h6" color="error.main">{summary.totalSales.toLocaleString()}</Typography></CardContent></Card></Grid>
-          <Grid item xs={6} sm={4} md={2}><Card sx={{ bgcolor: '#fff3e0' }}><CardContent sx={{ textAlign: 'center' }}><Typography variant="caption">Closing</Typography><Typography variant="h6">{summary.totalClosing.toLocaleString()}</Typography></CardContent></Card></Grid>
-          <Grid item xs={6} sm={4} md={2}><Card sx={{ bgcolor: '#f3e5f5' }}><CardContent sx={{ textAlign: 'center' }}><Typography variant="caption">Sale Amt (₹)</Typography><Typography variant="h6">₹{summary.totalSaleAmount.toLocaleString()}</Typography></CardContent></Card></Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card elevation={1} sx={{ borderRadius: 3, transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <InventoryIcon color="primary" sx={{ fontSize: 28, mb: 0.5, opacity: 0.7 }} />
+                <Typography variant="caption" color="text.secondary" display="block">Opening</Typography>
+                <Typography variant="h6" fontWeight={700}>{summary.totalOpening.toLocaleString()}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card elevation={1} sx={{ borderRadius: 3, transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <TrendingUpIcon color="success" sx={{ fontSize: 28, mb: 0.5, opacity: 0.7 }} />
+                <Typography variant="caption" color="text.secondary" display="block">Receipts</Typography>
+                <Typography variant="h6" fontWeight={700} color="success.main">{summary.totalReceipts.toLocaleString()}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card elevation={1} sx={{ borderRadius: 3, transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <TransferIcon color="info" sx={{ fontSize: 28, mb: 0.5, opacity: 0.7 }} />
+                <Typography variant="caption" color="text.secondary" display="block">{location === 'shop' ? 'Transfers Out' : 'Transfers In'}</Typography>
+                <Typography variant="h6" fontWeight={700} color="info.main">{summary.totalTransfers.toLocaleString()}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card elevation={1} sx={{ borderRadius: 3, transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <PaidIcon color="error" sx={{ fontSize: 28, mb: 0.5, opacity: 0.7 }} />
+                <Typography variant="caption" color="text.secondary" display="block">Sold</Typography>
+                <Typography variant="h6" fontWeight={700} color="error.main">{summary.totalSales.toLocaleString()}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card elevation={1} sx={{ borderRadius: 3, transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <InventoryIcon color="warning" sx={{ fontSize: 28, mb: 0.5, opacity: 0.7 }} />
+                <Typography variant="caption" color="text.secondary" display="block">Closing</Typography>
+                <Typography variant="h6" fontWeight={700}>{summary.totalClosing.toLocaleString()}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} sm={4} md={2}>
+            <Card elevation={1} sx={{ borderRadius: 3, transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+              <CardContent sx={{ textAlign: 'center', py: 2 }}>
+                <PaidIcon color="secondary" sx={{ fontSize: 28, mb: 0.5, opacity: 0.7 }} />
+                <Typography variant="caption" color="text.secondary" display="block">Sale Amt (₹)</Typography>
+                <Typography variant="h6" fontWeight={700}>₹{summary.totalSaleAmount.toLocaleString()}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
 
-        <Paper sx={{ p: 2, mb: 3, borderRadius: 2 }}>
-          <Typography variant="subtitle1" fontWeight={600} gutterBottom>
-            {editMode ? 'Payment Totals for the Day' : 'Saved Payment Totals'}
+        {/* Payment Totals Card */}
+        <Paper elevation={1} sx={{ p: 2, mb: 3, borderRadius: 3, bgcolor: alpha(theme.palette.primary.main, 0.03) }}>
+          <Typography variant="subtitle1" fontWeight={600} gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            {editMode ? '✏️ Payment Totals for the Day' : '💾 Saved Payment Totals'}
           </Typography>
           <Grid container spacing={2}>
             <Grid item xs={4}>
-              <TextField fullWidth label="Cash (₹)" type="number" value={paymentTotals.cash} disabled={!editMode} onChange={(e) => handlePaymentChange('cash', e.target.value)} />
+              <TextField fullWidth label="Cash (₹)" type="number" value={paymentTotals.cash} disabled={!editMode} onChange={(e) => handlePaymentChange('cash', e.target.value)}
+                InputProps={{ sx: { borderRadius: 2, bgcolor: editMode ? 'background.paper' : '#f5f5f5' } }} />
             </Grid>
             <Grid item xs={4}>
-              <TextField fullWidth label="UPI (₹)" type="number" value={paymentTotals.upi} disabled={!editMode} onChange={(e) => handlePaymentChange('upi', e.target.value)} />
+              <TextField fullWidth label="UPI (₹)" type="number" value={paymentTotals.upi} disabled={!editMode} onChange={(e) => handlePaymentChange('upi', e.target.value)}
+                InputProps={{ sx: { borderRadius: 2, bgcolor: editMode ? 'background.paper' : '#f5f5f5' } }} />
             </Grid>
             <Grid item xs={4}>
-              <TextField fullWidth label="Card (₹)" type="number" value={paymentTotals.card} disabled={!editMode} onChange={(e) => handlePaymentChange('card', e.target.value)} />
+              <TextField fullWidth label="Card (₹)" type="number" value={paymentTotals.card} disabled={!editMode} onChange={(e) => handlePaymentChange('card', e.target.value)}
+                InputProps={{ sx: { borderRadius: 2, bgcolor: editMode ? 'background.paper' : '#f5f5f5' } }} />
             </Grid>
           </Grid>
         </Paper>
 
-        <Paper sx={{ p: 2, mb: 3 }}>
-          <TextField fullWidth size="small" placeholder="Search..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
-            InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon /></InputAdornment>,
-              endAdornment: searchTerm && <IconButton onClick={() => setSearchTerm('')}><ClearIcon /></IconButton> }} />
+        {/* Search Bar */}
+        <Paper elevation={1} sx={{ p: 1.5, mb: 3, borderRadius: 3 }}>
+          <TextField fullWidth size="small" placeholder="🔍 Search by brand name, code or size..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchIcon color="action" /></InputAdornment>,
+              endAdornment: searchTerm && <IconButton onClick={() => setSearchTerm('')}><ClearIcon /></IconButton>,
+              sx: { borderRadius: 2, bgcolor: 'background.paper' }
+            }} />
         </Paper>
 
-        <Paper sx={{ borderRadius: 2, overflow: 'hidden' }}>
+        {/* Stock Table */}
+        <Paper elevation={2} sx={{ borderRadius: 3, overflow: 'hidden' }}>
           {loading ? <Box sx={{ p: 4, textAlign: 'center' }}><CircularProgress /></Box> :
-           error ? <Alert severity="error" sx={{ m: 2 }}>{error}</Alert> :
-           filteredData.length === 0 ? <Alert severity="info" sx={{ m: 2 }}>No stock data</Alert> :
-           <>
-            <TableContainer><Table stickyHeader size="small">
-              <TableHead><TableRow>
-                <TableCell>Brand Code</TableCell>
-                <TableCell>Brand Name</TableCell>
-                <TableCell>Size (ml)</TableCell>
-                <TableCell align="right">Opening</TableCell>
-                <TableCell align="right">Cases Rec</TableCell>
-                <TableCell align="right">Loose Rec</TableCell>
-                <TableCell align="right">Total Rec</TableCell>
-                <TableCell align="right">{location === 'shop' ? 'Transfers Out' : 'Transfers In'}</TableCell>
-                <TableCell align="right">Closing</TableCell>
-                <TableCell align="right">Sold</TableCell>
-                <TableCell align="right">MRP</TableCell>
-                <TableCell align="right">Sale Amt</TableCell>
-              </TableRow></TableHead>
-              <TableBody>
-                {paginatedData.map((item) => (
-                  <TableRow key={item.product_id} hover>
-                    <TableCell>{item.brand_code}</TableCell>
-                    <TableCell>{item.brand_name}</TableCell>
-                    <TableCell>{item.size_ml}</TableCell>
-                    <TableCell align="right">{item.opening_stock}</TableCell>
-                    <TableCell align="right">{editMode ? <TextField type="number" size="small" value={item.receipts_cases} onChange={(e) => handleReceiptsChange(item.product_id, 'receipts_cases', e.target.value)} sx={{ width: 70 }} inputProps={{ min: 0 }} /> : item.receipts_cases}</TableCell>
-                    <TableCell align="right">{editMode ? <TextField type="number" size="small" value={item.receipts_loose} onChange={(e) => handleReceiptsChange(item.product_id, 'receipts_loose', e.target.value)} sx={{ width: 70 }} inputProps={{ min: 0 }} /> : item.receipts_loose}</TableCell>
-                    <TableCell align="right"><strong>{(item.receipts_cases * (item.pack_qty || 1)) + item.receipts_loose}</strong></TableCell>
-                    <TableCell align="right">{location === 'shop' ? (item.transfers_out || 0) : (item.transfers_in || 0)}</TableCell>
-                    <TableCell align="right">{editMode ? <TextField type="number" size="small" value={item.closing_stock_physical} onChange={(e) => handleClosingStockChange(item.product_id, e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0 }} /> : <strong>{item.closing_stock}</strong>}</TableCell>
-                    <TableCell align="right">{item.sale_bottles || 0}</TableCell>
-                    <TableCell align="right">₹{item.mrp}</TableCell>
-                    <TableCell align="right">₹{(item.sale_amount || 0).toLocaleString()}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table></TableContainer>
-            <TablePagination rowsPerPageOptions={[10,25,50,100]} component="div" count={filteredData.length} rowsPerPage={rowsPerPage} page={page} onPageChange={(e,newPage)=>setPage(newPage)} onRowsPerPageChange={(e)=>{setRowsPerPage(parseInt(e.target.value,10)); setPage(0);}} />
-           </>}
+            error ? <Alert severity="error" sx={{ m: 2, borderRadius: 2 }}>{error}</Alert> :
+              filteredData.length === 0 ? <Alert severity="info" sx={{ m: 2, borderRadius: 2 }}>No stock data available for this date.</Alert> :
+                <>
+                  <TableContainer sx={{ maxHeight: '70vh' }}>
+                    <Table stickyHeader size="small">
+                      <TableHead>
+                        <TableRow sx={{ backgroundColor: theme.palette.grey[100] }}>
+                          <TableCell sx={{ fontWeight: 700, py: 1.5 }}>Brand Code</TableCell>
+                          <TableCell sx={{ fontWeight: 700, py: 1.5 }}>Brand Name</TableCell>
+                          <TableCell sx={{ fontWeight: 700, py: 1.5 }}>Size (ml)</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>Opening</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>Cases Rec</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>Loose Rec</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>{location === 'shop' ? 'Transfers Out' : 'Transfers In'}</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>Total</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>Closing</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>Sold</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>MRP (₹)</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700, py: 1.5 }}>Sale Amt (₹)</TableCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {paginatedData.map((item, idx) => (
+                          <TableRow key={item.product_id} hover sx={{ '&:nth-of-type(odd)': { backgroundColor: alpha(theme.palette.primary.main, 0.02) } }}>
+                            <TableCell sx={{ fontFamily: 'monospace', fontWeight: 500 }}>{item.brand_code}</TableCell>
+                            <TableCell sx={{ fontWeight: 500 }}>{item.brand_name}</TableCell>
+                            <TableCell>{item.size_ml}</TableCell>
+                            <TableCell align="right">{item.opening_stock}</TableCell>
+                            <TableCell align="right">
+                              {editMode ?
+                                <TextField type="number" size="small" value={item.receipts_cases} onChange={(e) => handleReceiptsChange(item.product_id, 'receipts_cases', e.target.value)} sx={{ width: 70 }} inputProps={{ min: 0 }} />
+                                : item.receipts_cases}
+                            </TableCell>
+                            <TableCell align="right">
+                              {editMode ?
+                                <TextField type="number" size="small" value={item.receipts_loose} onChange={(e) => handleReceiptsChange(item.product_id, 'receipts_loose', e.target.value)} sx={{ width: 70 }} inputProps={{ min: 0 }} />
+                                : item.receipts_loose}
+                            </TableCell>
+                            <TableCell align="right">{location === 'shop' ? (item.transfers_out || 0) : (item.transfers_in || 0)}</TableCell>
+                            <TableCell align="right"><strong>{item.total_before_closing !== undefined ? item.total_before_closing : (item.opening_stock + (item.receipts_cases * (item.pack_qty || 1) + item.receipts_loose) - (location === 'shop' ? (item.transfers_out || 0) : (item.transfers_in || 0)))}</strong></TableCell>
+                            <TableCell align="right">
+                              {editMode ?
+                                <TextField type="number" size="small" value={item.closing_stock_physical} onChange={(e) => handleClosingStockChange(item.product_id, e.target.value)} sx={{ width: 80 }} inputProps={{ min: 0 }} />
+                                : <strong>{item.closing_stock}</strong>}
+                            </TableCell>
+                            <TableCell align="right">{item.sale_bottles || 0}</TableCell>
+                            <TableCell align="right">₹{item.mrp.toLocaleString()}</TableCell>
+                            <TableCell align="right">₹{(item.sale_amount || 0).toLocaleString()}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </TableContainer>
+                  <TablePagination
+                    rowsPerPageOptions={[10, 25, 50, 100]}
+                    component="div"
+                    count={filteredData.length}
+                    rowsPerPage={rowsPerPage}
+                    page={page}
+                    onPageChange={(e, newPage) => setPage(newPage)}
+                    onRowsPerPageChange={(e) => { setRowsPerPage(parseInt(e.target.value, 10)); setPage(0); }}
+                    sx={{ borderTop: `1px solid ${theme.palette.divider}` }}
+                  />
+                </>}
         </Paper>
 
-        <Dialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)}>
-          <DialogTitle>Save Stock Reconciliation</DialogTitle>
-          <DialogContent><Typography>Are you sure?</Typography></DialogContent>
-          <DialogActions><Button onClick={() => setSaveDialogOpen(false)}>Cancel</Button><Button variant="contained" onClick={saveReconciliation} disabled={saving}>Save</Button></DialogActions>
+        <Dialog open={saveDialogOpen} onClose={() => setSaveDialogOpen(false)} PaperProps={{ sx: { borderRadius: 3 } }}>
+          <DialogTitle sx={{ bgcolor: alpha(theme.palette.warning.main, 0.1) }}>Confirm Save</DialogTitle>
+          <DialogContent sx={{ mt: 2 }}>
+            <Typography>Are you sure you want to save today's stock reconciliation? This will overwrite any previous saved data.</Typography>
+          </DialogContent>
+          <DialogActions sx={{ p: 2 }}>
+            <Button onClick={() => setSaveDialogOpen(false)} variant="outlined" sx={{ borderRadius: 2, textTransform: 'none' }}>Cancel</Button>
+            <Button variant="contained" onClick={saveReconciliation} disabled={saving} sx={{ borderRadius: 2, textTransform: 'none' }}>Confirm Save</Button>
+          </DialogActions>
         </Dialog>
 
-        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })}>
-          <Alert severity={snackbar.severity}>{snackbar.message}</Alert>
+        <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+          <Alert severity={snackbar.severity} onClose={() => setSnackbar({ ...snackbar, open: false })} sx={{ borderRadius: 2, boxShadow: 3 }}>
+            {snackbar.message}
+          </Alert>
         </Snackbar>
       </Box>
     </LocalizationProvider>

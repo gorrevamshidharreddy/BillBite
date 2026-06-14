@@ -99,28 +99,6 @@ class MartRequest(Base):
 
 
 # ========================
-# 2. Menu (Restaurant)
-# ========================
-class Category(Base):
-    __tablename__ = "categories"
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    name = Column(String(255), nullable=False)
-    items = relationship("MenuItem", back_populates="category")
-
-
-class MenuItem(Base):
-    __tablename__ = "menu_items"
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    category_id = Column(String(36), ForeignKey("categories.id"), nullable=True)
-    name = Column(String(255), nullable=False)
-    price = Column(Float, nullable=False)
-    item_type = Column(String(20), nullable=False)
-    is_available = Column(Boolean, default=True)
-    category = relationship("Category", back_populates="items")
-
-
 # ========================
 # 3. Orders & Bills
 # ========================
@@ -140,33 +118,11 @@ class OrderItem(Base):
     __tablename__ = "order_items"
     id = Column(String(36), primary_key=True, default=generate_uuid)
     order_id = Column(String(36), ForeignKey("orders.id"), nullable=False)
-    menu_item_id = Column(String(36), ForeignKey("menu_items.id"), nullable=False)
+    product_id = Column(String(36), ForeignKey("liquor_products.id"), nullable=False)
     quantity = Column(Integer, nullable=False)
     unit_price = Column(Float, nullable=False)
     cost_price = Column(Float, nullable=True)
     order = relationship("Order", back_populates="items")
-
-
-# ========================
-# 4. Packaged Stock (Restaurant)
-# ========================
-class PackagedStock(Base):
-    __tablename__ = "packaged_stock"
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    menu_item_id = Column(String(36), ForeignKey("menu_items.id"), unique=True, nullable=False)
-    quantity_in_stock = Column(Integer, default=0)
-    low_stock_threshold = Column(Integer, default=5)
-
-
-class StockMovement(Base):
-    __tablename__ = "stock_movements"
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
-    packaged_stock_id = Column(String(36), ForeignKey("packaged_stock.id"), nullable=False)
-    movement_type = Column(String(20), nullable=False)
-    quantity_change = Column(Integer, nullable=False)
-    timestamp = Column(DateTime, default=datetime.utcnow)
 
 
 # ========================
